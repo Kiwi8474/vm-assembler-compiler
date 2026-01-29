@@ -58,6 +58,16 @@ class OutNode:
         self.port = port
         self.data = data
 
+class LoadNode:
+    def __init__(self, sector, address):
+        self.sector = sector
+        self.address = address
+
+class SaveNode:
+    def __init__(self, sector, address):
+        self.sector = sector
+        self.address = address
+
 # --- TOKENIZER ---
 TOKEN_SPEC = [
     ('DIRECTIVE', r'#[A-Za-z_]+'),
@@ -75,6 +85,8 @@ TOKEN_SPEC = [
     ('RPAREN',    r'\)'),
     ('GOTO',      r'goto'),
     ('OUT', r'out\b'),
+    ('LOAD', r'load\b'),
+    ('SAVE', r'save\b'),
     ('LABEL',     r'[A-Za-z_][A-Za-z0-9_]*:'),
     ('NAME',      r'[A-Za-z_][A-Za-z0-9_]*'),
     ('COMMA',     r','),
@@ -142,6 +154,13 @@ class Parser:
             data = self.parse_expression() # Welche Daten?
             self.eat('SEMICOLON')
             return OutNode(port, data)
+        if t[0] in ['LOAD', 'SAVE']:
+            type = self.eat()[0]
+            sector = self.parse_expression()
+            self.eat('COMMA')
+            address = self.parse_expression()
+            self.eat('SEMICOLON')
+            return LoadNode(sector, address) if type == 'LOAD' else SaveNode(sector, address)
         if t[0] == 'IF': return self.parse_if()
         if t[0] in ['NUMBER', 'DEREF']:
             node = self.parse_assignment()
@@ -248,6 +267,17 @@ def generate_asm(statements, is_sub_block=False):
             asm.append(generate_expression_asm(stmt.data))
             asm.append("mov r6, r0")
             asm.append("out r5, r6")
+        elif isinstance(stmt, (LoadNode, SaveNode)):
+            # 1. Sektor-Ausdruck berechnen -> r11
+            asm.append(generate_expression_asm(stmt.sector))
+            asm.append("mov r11, r0")
+            # 2. Adress-Ausdruck berechnen -> r12
+            asm.append(generate_expression_asm(stmt.address))
+            asm.append("mov r12, r0")
+            # 3. Befehl ausführen (r13 ist einfach ein Dummy/0)
+            asm.append("movi r13, 0")
+            cmd = "load" if isinstance(stmt, LoadNode) else "save"
+            asm.append(f"{cmd} r11, r12, r13")
         elif isinstance(stmt, IfNode):
             if_label_count += 1
             label_end = f"_endif_{if_label_count}"
