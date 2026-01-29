@@ -51,11 +51,25 @@ def add(reg_a, reg_b, reg_c):
 def sub(reg_a, reg_b, reg_c):
     regs[reg_a] -= regs[reg_b]
 
-def shl(reg_a, reg_b, reg_c):
-    regs[reg_a] = regs[reg_a] << regs[reg_b]
+def mul(reg_a, reg_b, reg_c):
+    regs[reg_a] *= regs[reg_b]
 
-def shr(reg_a, reg_b, reg_c):
-    regs[reg_a] = regs[reg_a] >> regs[reg_b]
+def div(reg_a, reg_b, reg_c):
+    if regs[reg_b] != 0:
+        regs[reg_a] //= regs[reg_b]
+    else:
+        print("Zero Division. Shutting down.")
+        dump()
+        sys.exit(1)
+
+def out(reg_a, reg_b, reg_c):
+    port = regs[reg_a]
+    data = regs[reg_b]
+
+    if port == 0x1:
+        print(chr(data), end='', flush=True)
+    elif port == 0x2:
+        print(f"{data}/{hex(data)}", end='', flush=True)
 
 def je(reg_a, reg_b, reg_c):
     if regs[reg_a] == regs[reg_b]:
@@ -119,8 +133,9 @@ isa = {
     0x2: movi,
     0x3: add,
     0x4: sub,
-    0x5: shl,
-    0x6: shr,
+    0x5: mul,
+    0x6: div,
+    0x7: out,
     0x8: je,
     0x9: jne,
     0xA: peek,

@@ -4,14 +4,15 @@ import sys
 import re
 from assembler import assemble
 
+# --- AST NODES ---
 class NumberNode:
     def __init__(self, value):
-        self.value = int(value, 0) # Wandelt 0x123 oder 123 in echte Zahlen um
+        self.value = int(value, 0)
     def __repr__(self): return f"Num({self.value})"
 
 class DerefNode:
     def __init__(self, target_node):
-        self.target = target_node # Das Ziel (z.B. ein NumberNode)
+        self.target = target_node
     def __repr__(self): return f"Deref({self.target})"
 
 class BinOpNode:
@@ -22,57 +23,74 @@ class BinOpNode:
     def __repr__(self): return f"BinOp({self.left} {self.op} {self.right})"
 
 class AssignNode:
-    def __init__(self, target_addr, value_node):
-        self.target = int(target_addr, 0)
+    def __init__(self, target_node, value_node):
+        self.target = target_node  # Kann jetzt NumberNode ODER DerefNode sein!
         self.value = value_node
-    def __repr__(self): return f"Assign({hex(self.target)} = {self.value})"
+    def __repr__(self): return f"Assign({self.target} = {self.value})"
 
 class LabelNode:
     def __init__(self, name):
-        self.name = name.replace(":", "") # Wir speichern nur den Namen
+        self.name = name.replace(":", "")
 
 class GotoNode:
     def __init__(self, target):
-        # target kann ein String (Label) oder ein Integer (Adresse) sein
         if isinstance(target, str) and target.startswith("0x"):
             self.target = int(target, 0)
         elif target.isdigit():
             self.target = int(target)
         else:
-            self.target = target # Es ist ein Label-Name (String)
+            self.target = target
 
 class DirectiveNode:
     def __init__(self, name, value):
-        self.name = name.lower() # z.B. "#org"
-        self.value = int(value, 0) # Die Adresse
+        self.name = name.lower()
+        self.value = int(value, 0)
 
+class IfNode:
+    def __init__(self, left, op, right, block):
+        self.left = left
+        self.op = op
+        self.right = right
+        self.block = block
+
+class OutNode:
+    def __init__(self, port, data):
+        self.port = port
+        self.data = data
+
+# --- TOKENIZER ---
 TOKEN_SPEC = [
-    ('DIRECTIVE', r'#[A-Za-z_]+'),            # Präprozessor-Direktiven
-    ('NUMBER',   r'(0x[0-9A-Fa-f]+|\d+)'),    # Hexadezimal oder Dezimal
-    ('ASSIGN',   r'='),                       # Zuweisung
-    ('DEREF',    r'\$'),                      # Pointer Dereferenzierung
-    ('OP',       r'[+\-*/]'),                 # Arithmetik
-    ('SEMICOLON',  r';'),                     # Semikolon. Ende eines Ausdrucks
-    ('LPAREN',   r'\('),                      # (
-    ('RPAREN',   r'\)'),                      # )
-    ('GOTO',     r'goto'),                    # Das Schlüsselwort
-    ('LABEL',    r'[A-Za-z_][A-Za-z0-9_]*:'), # Erkennt "name:"
-    ('NAME',     r'[A-Za-z_][A-Za-z0-9_]*'),  # Erkennt "name" (ohne Doppelpunkt)
-    ('WHITESPACE', r'\s+'),                   # Leerzeichen (ignorieren wir)
+    ('DIRECTIVE', r'#[A-Za-z_]+'),
+    ('NUMBER',    r'(0x[0-9A-Fa-f]+|\d+)'),
+    ('IF',        r'if\b'),
+    ('EQ',        r'=='),
+    ('NE',        r'!='),
+    ('ASSIGN',    r'='),
+    ('DEREF',     r'\$'),
+    ('OP',        r'[+\-*/]'),
+    ('SEMICOLON', r';'),
+    ('LBRACE',    r'\{'),
+    ('RBRACE',    r'\}'),
+    ('LPAREN',    r'\('),
+    ('RPAREN',    r'\)'),
+    ('GOTO',      r'goto'),
+    ('OUT', r'out\b'),
+    ('LABEL',     r'[A-Za-z_][A-Za-z0-9_]*:'),
+    ('NAME',      r'[A-Za-z_][A-Za-z0-9_]*'),
+    ('COMMA',     r','),
+    ('WHITESPACE', r'\s+'),
 ]
 
 def tokenize(code):
     tokens = []
     tok_regex = '|'.join('(?P<%s>%s)' % pair for pair in TOKEN_SPEC)
-    
     for mo in re.finditer(tok_regex, code):
         kind = mo.lastgroup
-        value = mo.group()
-        if kind == 'WHITESPACE':
-            continue
-        tokens.append((kind, value))
+        if kind == 'WHITESPACE': continue
+        tokens.append((kind, mo.group()))
     return tokens
 
+# --- PARSER ---
 class Parser:
     def __init__(self, tokens):
         self.tokens = tokens
@@ -83,126 +101,182 @@ class Parser:
 
     def eat(self, expected_type=None):
         token = self.peek_token()
-        if not token:
-            raise Exception("Unerwartetes Ende des Codes!")
+        if not token: raise Exception("Unerwartetes Ende!")
         if expected_type and token[0] != expected_type:
-            raise Exception(f"Syntax-Fehler: Erwartete {expected_type}, bekam {token[0]}")
+            raise Exception(f"Erwartete {expected_type}, bekam {token[0]}")
         self.pos += 1
         return token
 
     def parse_factor(self):
-        """Ein Faktor ist die kleinste Einheit: Eine Zahl oder ein Deref."""
         token = self.peek_token()
-        
-        if token[0] == 'DEREF':
+        if token[0] == 'LPAREN':
+            self.eat('LPAREN')
+            node = self.parse_expression() # Rekursion! Wir parsen alles in der Klammer
+            self.eat('RPAREN')
+            return node
+        elif token[0] == 'DEREF':
             self.eat('DEREF')
-            addr_token = self.eat('NUMBER')
-            return DerefNode(NumberNode(addr_token[1]))
-        
+            # Hier auch wichtig: Erlaube Ausdrücke nach dem $, nicht nur Nummern!
+            # return DerefNode(self.parse_factor()) 
+            return DerefNode(NumberNode(self.eat('NUMBER')[1]))
         elif token[0] == 'NUMBER':
-            num_token = self.eat('NUMBER')
-            return NumberNode(num_token[1])
-        
-        raise Exception(f"Unbekannter Faktor: {token}")
+            return NumberNode(self.eat('NUMBER')[1])
+        raise Exception(f"Faktor Fehler: {token}")
 
     def parse_expression(self):
-        """Verarbeitet Rechnungen wie A + B - C"""
         node = self.parse_factor()
-        
-        # Solange danach ein Operator kommt, hängen wir ihn dran
         while self.peek_token() and self.peek_token()[0] == 'OP':
-            op_token = self.eat('OP')
-            right_node = self.parse_factor()
-            node = BinOpNode(node, op_token[1], right_node)
-            
+            op = self.eat('OP')[1]
+            node = BinOpNode(node, op, self.parse_factor())
         return node
 
+    def parse_statement(self):
+        t = self.peek_token()
+        if t[0] == 'DIRECTIVE': return self.parse_directive()
+        if t[0] == 'LABEL': return LabelNode(self.eat('LABEL')[1])
+        if t[0] == 'GOTO': return self.parse_goto()
+        if t[0] == 'OUT':
+            self.eat('OUT')
+            port = self.parse_expression() # Welcher Port?
+            self.eat('COMMA')
+            data = self.parse_expression() # Welche Daten?
+            self.eat('SEMICOLON')
+            return OutNode(port, data)
+        if t[0] == 'IF': return self.parse_if()
+        if t[0] in ['NUMBER', 'DEREF']:
+            node = self.parse_assignment()
+            self.eat('SEMICOLON')
+            return node
+        raise Exception(f"Syntax Fehler bei {t}")
+
     def parse_assignment(self):
-        """Das Haupt-Statement: Ziel = Ausdruck"""
-        target_token = self.eat('NUMBER') # Die Zieladresse
+        target = self.parse_factor() 
         self.eat('ASSIGN')
-        expression_tree = self.parse_expression()
-        return AssignNode(target_token[1], expression_tree)
+        value = self.parse_expression()
+        return AssignNode(target, value)
 
     def parse_goto(self):
         self.eat('GOTO')
-        # Schau, ob danach eine Nummer oder ein Name kommt
-        token = self.peek_token()
-        if token[0] in ['NUMBER', 'NAME']:
-            target = self.eat(token[0])[1]
-            self.eat('SEMICOLON')
-            return GotoNode(target)
-        raise Exception("Nach goto muss eine Adresse oder ein Label kommen!")
+        target = self.eat()[1]
+        self.eat('SEMICOLON')
+        return GotoNode(target)
 
     def parse_directive(self):
-        token = self.eat('DIRECTIVE')
-        value_token = self.eat('NUMBER')
-        # Direktiven brauchen bei uns kein Semikolon, wie in C
-        return DirectiveNode(token[1], value_token[1])
+        name = self.eat('DIRECTIVE')[1]
+        val = self.eat('NUMBER')[1]
+        return DirectiveNode(name, val)
+
+    def parse_if(self):
+        self.eat('IF')
+        left = self.parse_expression()
+        op = self.eat()[1] # == oder !=
+        right = self.parse_expression()
+        self.eat('LBRACE')
+        block = []
+        while self.peek_token() and self.peek_token()[0] != 'RBRACE':
+            block.append(self.parse_statement())
+        self.eat('RBRACE')
+        return IfNode(left, op, right, block)
 
     def parse_program(self):
-        """Liest das ganze File und entscheidet, was für ein Knotentyp kommt."""
-        statements = []
-        while self.peek_token() is not None:
-            token = self.peek_token()
-            
-            if token[0] == 'DIRECTIVE':
-                statements.append(self.parse_directive())
-            
-            elif token[0] == 'LABEL':
-                # Ein Label ist einfach nur der Name mit Doppelpunkt
-                label_token = self.eat('LABEL')
-                statements.append(LabelNode(label_token[1]))
-            
-            elif token[0] == 'GOTO':
-                statements.append(self.parse_goto())
-            
-            elif token[0] == 'NUMBER':
-                # Wenn eine Nummer am Zeilenanfang steht, ist es eine Zuweisung
-                stmt = self.parse_assignment()
-                statements.append(stmt)
-                self.eat('SEMICOLON')
-            
-            else:
-                raise Exception(f"Unerwartetes Token am Zeilenanfang: {token}")
-                
-        return statements
+        stmts = []
+        while self.peek_token(): stmts.append(self.parse_statement())
+        return stmts
 
-def generate_asm(statements):
-    full_asm = []
-    has_org = False
+# --- GENERATOR ---
+if_label_count = 0
+
+def generate_expression_asm(node):
+    if isinstance(node, NumberNode):
+        return f"movi r0, {hex(node.value)}"
+    if isinstance(node, DerefNode):
+        return f"movi r1, {hex(node.target.value)}\npeek r0, r1"
+    if isinstance(node, BinOpNode):
+        left = generate_expression_asm(node.left)
+        res = f"{left}\nmov r3, r0\n"
+        res += generate_expression_asm(node.right)
+        res += f"\nmov r2, r0\nmov r0, r3\n"
+        res += "add r0, r2" if node.op == '+' else "sub r0, r2"
+        return res
+
+def generate_asm(statements, is_sub_block=False):
+    global if_label_count
+    asm = []
     
-    # Erst mal nach einer ORG-Direktive suchen
-    for stmt in statements:
-        if isinstance(stmt, DirectiveNode) and stmt.name == "#org":
-            full_asm.append(f".org {hex(stmt.value)}")
-            has_org = True
-            break
-            
-    # Falls keine da ist, nimm den Standard
-    if not has_org:
-        full_asm.append(".org 0x0400")
+    # ORG nur ganz am Anfang schreiben, nicht in Unterblöcken!
+    if not is_sub_block:
+        found_org = False
+        for s in statements:
+            if isinstance(s, DirectiveNode) and s.name == "#org":
+                asm.append(f".org {hex(s.value)}")
+                found_org = True
+        if not found_org: asm.append(".org 0x0400")
 
-    # Jetzt den Rest generieren
     for stmt in statements:
         if isinstance(stmt, LabelNode):
-            full_asm.append(f"{stmt.name}:")
-            
+            asm.append(f"{stmt.name}:")
         elif isinstance(stmt, AssignNode):
-            full_asm.append(generate_expression_asm(stmt.value))
-            full_asm.append(f"movi r1, {hex(stmt.target)}")
-            full_asm.append("poke r0, r1")
+            # 1. Wert berechnen (z.B. 65 oder 0xFF)
+            asm.append(generate_expression_asm(stmt.value))
+            asm.append("mov r10, r0") # Wert SICHER in r10 parken
             
+            # 2. Zieladresse bestimmen
+            if isinstance(stmt.target, NumberNode):
+                # Direkte Adresse (z.B. 0x8000)
+                asm.append(f"movi r1, {hex(stmt.target.value)}")
+            elif isinstance(stmt.target, DerefNode):
+                # Indirekte Adresse (z.B. $0x8000)
+                # Wir berechnen den Ausdruck INNERHALB des $...
+                asm.append(generate_expression_asm(stmt.target.target)) 
+                # Jetzt steht in r0 die Adresse (z.B. 0x8000)
+                # Wir müssen JETZT peeken, um die ECHTE Zieladresse zu kriegen
+                asm.append("mov r1, r0")
+                asm.append("peek r0, r1") 
+                # Jetzt steht in r0 die 65! Das ist unser Ziel.
+                asm.append("mov r1, r0") 
+
+            # 3. Finaler Poke
+            asm.append("mov r0, r10") # Den Wert (0xFF) zurückholen
+            asm.append("poke r0, r1") # Wert (0xFF) an Adresse (65)
         elif isinstance(stmt, GotoNode):
-            if isinstance(stmt.target, int):
-                # Direkt an eine feste Speicheradresse springen
-                full_asm.append(f"movi r15, {hex(stmt.target)}")
+            target = hex(stmt.target) if isinstance(stmt.target, int) else stmt.target
+            asm.append(f"movi r15, {target}")
+        elif isinstance(stmt, OutNode):
+            # Port in r5, Daten in r6 laden (als Beispiel)
+            asm.append(generate_expression_asm(stmt.port))
+            asm.append("mov r5, r0")
+            asm.append(generate_expression_asm(stmt.data))
+            asm.append("mov r6, r0")
+            asm.append("out r5, r6")
+        elif isinstance(stmt, IfNode):
+            if_label_count += 1
+            label_end = f"_endif_{if_label_count}"
+            
+            # 1. Linke Seite berechnen -> r5
+            asm.append(generate_expression_asm(stmt.left))
+            asm.append("mov r5, r0")
+            # 2. Rechte Seite berechnen -> r6
+            asm.append(generate_expression_asm(stmt.right))
+            asm.append("mov r6, r0")
+            
+            # 3. Sprung-Ziel laden
+            asm.append(f"movi r4, {label_end}")
+            
+            # 4. Vergleich (Invertiert, um den Block zu überspringen!)
+            if stmt.op == "==":
+                asm.append("jne r5, r6, r4")
             else:
-                # Der Assembler setzt die Adresse des Labels für uns ein
-                full_asm.append(f"movi r15, {stmt.target}")
-    
-    full_asm.append("movi r15, 0x10000")
-    return "\n".join(full_asm)
+                asm.append("je r5, r6, r4")
+            
+            # 5. Block-Inhalt (Rekursion!)
+            asm.append(generate_asm(stmt.block, is_sub_block=True))
+            asm.append(f"{label_end}:")
+            
+    # Halt-Befehl nur am Ende des Hauptprogramms
+    if not is_sub_block:
+        asm.append("movi r15, 0x10000") # Dein System-Halt
+        
+    return "\n".join(asm)
 
 def generate_expression_asm(node):
     """Rekursive Funktion, die ASM für Rechnungen baut"""
@@ -233,6 +307,10 @@ def generate_expression_asm(node):
             op_asm = "add r0, r2"
         elif node.op == '-':
             op_asm = "sub r0, r2"
+        elif node.op == '*':
+            op_asm = "mul r0, r2"
+        elif node.op == '/':
+            op_asm = "div r0, r2"
         else:
             op_asm = "; OP nicht implementiert"
             
