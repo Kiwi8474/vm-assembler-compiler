@@ -211,7 +211,7 @@ def power(screen, clock, vga_font):
             cycle()
             cycles += 1
         else:
-            return True, "PC out of bounds. Rebooting."
+                return False, "PC out of bounds. Shutting Down."
 
 if __name__ == "__main__":
     pygame.init()

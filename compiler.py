@@ -27,14 +27,38 @@ class AssignNode:
         self.value = value_node
     def __repr__(self): return f"Assign({hex(self.target)} = {self.value})"
 
+class LabelNode:
+    def __init__(self, name):
+        self.name = name.replace(":", "") # Wir speichern nur den Namen
+
+class GotoNode:
+    def __init__(self, target):
+        # target kann ein String (Label) oder ein Integer (Adresse) sein
+        if isinstance(target, str) and target.startswith("0x"):
+            self.target = int(target, 0)
+        elif target.isdigit():
+            self.target = int(target)
+        else:
+            self.target = target # Es ist ein Label-Name (String)
+
+class DirectiveNode:
+    def __init__(self, name, value):
+        self.name = name.lower() # z.B. "#org"
+        self.value = int(value, 0) # Die Adresse
+
 TOKEN_SPEC = [
-    ('NUMBER',   r'(0x[0-9A-Fa-f]+|\d+)'),  # Hexadezimal oder Dezimal
-    ('ASSIGN',   r'='),                     # Zuweisung
-    ('DEREF',    r'\$'),                    # Pointer Dereferenzierung
-    ('OP',       r'[+\-*/]'),                # Arithmetik
-    ('LPAREN',   r'\('),                    # (
-    ('RPAREN',   r'\)'),                    # )
-    ('WHITESPACE', r'\s+'),                 # Leerzeichen (ignorieren wir)
+    ('DIRECTIVE', r'#[A-Za-z_]+'),            # Präprozessor-Direktiven
+    ('NUMBER',   r'(0x[0-9A-Fa-f]+|\d+)'),    # Hexadezimal oder Dezimal
+    ('ASSIGN',   r'='),                       # Zuweisung
+    ('DEREF',    r'\$'),                      # Pointer Dereferenzierung
+    ('OP',       r'[+\-*/]'),                 # Arithmetik
+    ('SEMICOLON',  r';'),                     # Semikolon. Ende eines Ausdrucks
+    ('LPAREN',   r'\('),                      # (
+    ('RPAREN',   r'\)'),                      # )
+    ('GOTO',     r'goto'),                    # Das Schlüsselwort
+    ('LABEL',    r'[A-Za-z_][A-Za-z0-9_]*:'), # Erkennt "name:"
+    ('NAME',     r'[A-Za-z_][A-Za-z0-9_]*'),  # Erkennt "name" (ohne Doppelpunkt)
+    ('WHITESPACE', r'\s+'),                   # Leerzeichen (ignorieren wir)
 ]
 
 def tokenize(code):
@@ -100,6 +124,122 @@ class Parser:
         expression_tree = self.parse_expression()
         return AssignNode(target_token[1], expression_tree)
 
+    def parse_goto(self):
+        self.eat('GOTO')
+        # Schau, ob danach eine Nummer oder ein Name kommt
+        token = self.peek_token()
+        if token[0] in ['NUMBER', 'NAME']:
+            target = self.eat(token[0])[1]
+            self.eat('SEMICOLON')
+            return GotoNode(target)
+        raise Exception("Nach goto muss eine Adresse oder ein Label kommen!")
+
+    def parse_directive(self):
+        token = self.eat('DIRECTIVE')
+        value_token = self.eat('NUMBER')
+        # Direktiven brauchen bei uns kein Semikolon, wie in C
+        return DirectiveNode(token[1], value_token[1])
+
+    def parse_program(self):
+        """Liest das ganze File und entscheidet, was für ein Knotentyp kommt."""
+        statements = []
+        while self.peek_token() is not None:
+            token = self.peek_token()
+            
+            if token[0] == 'DIRECTIVE':
+                statements.append(self.parse_directive())
+            
+            elif token[0] == 'LABEL':
+                # Ein Label ist einfach nur der Name mit Doppelpunkt
+                label_token = self.eat('LABEL')
+                statements.append(LabelNode(label_token[1]))
+            
+            elif token[0] == 'GOTO':
+                statements.append(self.parse_goto())
+            
+            elif token[0] == 'NUMBER':
+                # Wenn eine Nummer am Zeilenanfang steht, ist es eine Zuweisung
+                stmt = self.parse_assignment()
+                statements.append(stmt)
+                self.eat('SEMICOLON')
+            
+            else:
+                raise Exception(f"Unerwartetes Token am Zeilenanfang: {token}")
+                
+        return statements
+
+def generate_asm(statements):
+    full_asm = []
+    has_org = False
+    
+    # Erst mal nach einer ORG-Direktive suchen
+    for stmt in statements:
+        if isinstance(stmt, DirectiveNode) and stmt.name == "#org":
+            full_asm.append(f".org {hex(stmt.value)}")
+            has_org = True
+            break
+            
+    # Falls keine da ist, nimm den Standard
+    if not has_org:
+        full_asm.append(".org 0x0400")
+
+    # Jetzt den Rest generieren
+    for stmt in statements:
+        if isinstance(stmt, LabelNode):
+            full_asm.append(f"{stmt.name}:")
+            
+        elif isinstance(stmt, AssignNode):
+            full_asm.append(generate_expression_asm(stmt.value))
+            full_asm.append(f"movi r1, {hex(stmt.target)}")
+            full_asm.append("poke r0, r1")
+            
+        elif isinstance(stmt, GotoNode):
+            if isinstance(stmt.target, int):
+                # Direkt an eine feste Speicheradresse springen
+                full_asm.append(f"movi r15, {hex(stmt.target)}")
+            else:
+                # Der Assembler setzt die Adresse des Labels für uns ein
+                full_asm.append(f"movi r15, {stmt.target}")
+    
+    full_asm.append("movi r15, 0x10000")
+    return "\n".join(full_asm)
+
+def generate_expression_asm(node):
+    """Rekursive Funktion, die ASM für Rechnungen baut"""
+    if isinstance(node, NumberNode):
+        return f"movi r0, {hex(node.value)}"
+    
+    if isinstance(node, DerefNode):
+        # r1 = Adresse, dann r0 = [r1] (peek)
+        # Beachte: node.target ist wieder ein Node (meist NumberNode)
+        return f"movi r1, {hex(node.target.value)}\npeek r0, r1"
+
+    if isinstance(node, BinOpNode):
+        # 1. Linke Seite (Ergebnis in r0)
+        left_asm = generate_expression_asm(node.left)
+        
+        # 2. Wir brauchen r0 für die rechte Seite, also r0 -> r3 retten
+        # (Einfaches Register-Management für den Anfang)
+        save_asm = "mov r3, r0"
+        
+        # 3. Rechte Seite (Ergebnis in r0)
+        right_asm = generate_expression_asm(node.right)
+        
+        # 4. Rechnen (r3 OP r0 -> r0)
+        # Wir tauschen r0 und r2 für die OP
+        prep_op = "mov r2, r0\nmov r0, r3" 
+        
+        if node.op == '+':
+            op_asm = "add r0, r2"
+        elif node.op == '-':
+            op_asm = "sub r0, r2"
+        else:
+            op_asm = "; OP nicht implementiert"
+            
+        return f"{left_asm}\n{save_asm}\n{right_asm}\n{prep_op}\n{op_asm}"
+
+    return ""
+
 def compile(input_file):
     with open(input_file, "r") as f:
         code = f.read()
@@ -107,16 +247,15 @@ def compile(input_file):
     # 1. In Tokens zerlegen
     tokens = tokenize(code)
     
-    # 2. Baum bauen (AST)
+    # 2. Baum bauen (AST Liste)
     parser = Parser(tokens)
-    # Für den Anfang gehen wir davon aus, dass nur EINE Zeile drin steht
-    # Später machen wir eine Schleife für das ganze File
-    ast = parser.parse_assignment()
+    statements = parser.parse_program() # Holt alle Zeilen!
     
-    # 3. Hier kommt später der Generator, der aus dem 'ast' ASM macht
-    # Erst mal geben wir einen Platzhalter zurück
-    print(f"AST gebaut: {ast}")
-    return ".org 0x0400"
+    # 3. ASM Generierung
+    # Wir übergeben die Liste der Statements an unseren Generator
+    asm_output = generate_asm(statements)
+    
+    return asm_output
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
