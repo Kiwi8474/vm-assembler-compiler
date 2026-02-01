@@ -98,10 +98,12 @@ if __name__ == "__main__":
     if len(bytecode) > 512:
         print(f"Warnung: {input_file} ist mit {len(bytecode)} Bytes zu groß für einen Sektor!")
 
+    padded_bytecode = bytecode.ljust(512, b'\x00')
+
     try:
         with open("disk.bin", "r+b") as f:
             f.seek(target_sector * 512)
-            f.write(bytecode)
+            f.write(padded_bytecode)
         print(f"Erfolg! {input_file} wurde in Sektor {target_sector} geschrieben.")
     except FileNotFoundError:
         print("Fehler: disk.bin existiert nicht.")

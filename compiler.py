@@ -12,9 +12,10 @@ class NumberNode:
     def __repr__(self): return f"Num({self.value}, {self.size}bit)"
 
 class DerefNode:
-    def __init__(self, target_node):
+    def __init__(self, target_node, size=16):
         self.target = target_node
-    def __repr__(self): return f"Deref({self.target})"
+        self.size = size
+    def __repr__(self): return f"Deref({self.target}, {self.size}bit)"
 
 class BinOpNode:
     def __init__(self, left, op, right):
@@ -24,10 +25,11 @@ class BinOpNode:
     def __repr__(self): return f"BinOp({self.left} {self.op} {self.right})"
 
 class AssignNode:
-    def __init__(self, target_node, value_node):
+    def __init__(self, target_node, value_node, size=16):
         self.target = target_node  # Kann jetzt NumberNode ODER DerefNode sein!
         self.value = value_node
-    def __repr__(self): return f"Assign({self.target} = {self.value})"
+        self.size = size
+    def __repr__(self): return f"Assign({self.target} = {self.value}, {self.size}bit)"
 
 class LabelNode:
     def __init__(self, name):
@@ -76,6 +78,7 @@ class StringNode:
 
 # --- TOKENIZER ---
 TOKEN_SPEC = [
+    ('TYPE',       r'uint8\b|uint16\b'),
     ('DIRECTIVE', r'#[A-Za-z_]+'),
     ('NUMBER',    r'(0x[0-9A-Fa-f]+|\d+)'),
     ('IF',        r'if\b'),
@@ -127,26 +130,26 @@ class Parser:
         self.pos += 1
         return token
 
-    def parse_factor(self):
+    def parse_factor(self, size=16):
         token = self.peek_token()
+    
+        # 1. Check, ob ein Typ-Cast kommt (z.B. uint8 $)
+        current_size = 16 # Default
+        if token[0] == 'TYPE':
+            type_str = self.eat('TYPE')[1]
+            current_size = 8 if type_str == 'uint8' else 16
+            token = self.peek_token() # Schau dir das nächste Token an ($ oder Nummer)
+
+        # 2. Bestehende Logik, aber mit current_size
         if token[0] == 'CHAR':
             val = ord(self.eat('CHAR')[1][1])
             return NumberNode(val, size=8)
-        elif token[0] == 'STRING':
-            return StringNode(self.eat('STRING')[1])
-        elif token[0] == 'LPAREN':
-            self.eat('LPAREN')
-            node = self.parse_expression() # Rekursion! Wir parsen alles in der Klammer
-            self.eat('RPAREN')
-            return node
         elif token[0] == 'DEREF':
             self.eat('DEREF')
-            # Hier auch wichtig: Erlaube Ausdrücke nach dem $, nicht nur Nummern!
-            # return DerefNode(self.parse_factor()) 
-            return DerefNode(NumberNode(self.eat('NUMBER')[1]))
+            num_node = NumberNode(self.eat('NUMBER')[1])
+            return DerefNode(num_node, size=current_size) # Hier die Größe nutzen!
         elif token[0] == 'NUMBER':
-            return NumberNode(self.eat('NUMBER')[1], size=16)
-        raise Exception(f"Faktor Fehler: {token}")
+            return NumberNode(self.eat('NUMBER')[1], size=current_size)
 
     def parse_expression(self):
         node = self.parse_factor()
@@ -157,6 +160,13 @@ class Parser:
 
     def parse_statement(self):
         t = self.peek_token()
+
+        current_size = 16
+        if t[0] == 'TYPE':
+            type_str = self.eat('TYPE')[1]
+            current_size = 8 if type_str == 'uint8' else 16
+            t = self.peek_token()
+
         if t[0] == 'DIRECTIVE': return self.parse_directive()
         if t[0] == 'LABEL': return LabelNode(self.eat('LABEL')[1])
         if t[0] == 'GOTO': return self.parse_goto()
@@ -176,16 +186,19 @@ class Parser:
             return LoadNode(sector, address) if type == 'LOAD' else SaveNode(sector, address)
         if t[0] == 'IF': return self.parse_if()
         if t[0] in ['NUMBER', 'DEREF']:
-            node = self.parse_assignment()
+            node = self.parse_assignment(current_size)
             self.eat('SEMICOLON')
             return node
         raise Exception(f"Syntax Fehler bei {t}")
 
-    def parse_assignment(self):
+    def parse_assignment(self, size):
         target = self.parse_factor() 
+        if isinstance(target, DerefNode):
+            target.size = size
+            
         self.eat('ASSIGN')
         value = self.parse_expression()
-        return AssignNode(target, value)
+        return AssignNode(target, value, size=size)
 
     def parse_goto(self):
         self.eat('GOTO')
@@ -221,15 +234,19 @@ if_label_count = 0
 def generate_expression_asm(node):
     if isinstance(node, NumberNode):
         return f"movi r0, {hex(node.value)}"
+    
     if isinstance(node, DerefNode):
-        return f"movi r1, {hex(node.target.value)}\nmovi r2, 0\npeek r0, r1, r2"
+        mode = 1 if node.size == 8 else 0
+        return f"movi r1, {hex(node.target.value)}\nmovi r2, {mode}\npeek r0, r1, r2"
+    
     if isinstance(node, BinOpNode):
         left = generate_expression_asm(node.left)
         res = f"{left}\nmov r3, r0\n"
         res += generate_expression_asm(node.right)
         res += f"\nmov r2, r0\nmov r0, r3\n"
-        res += "add r0, r2" if node.op == '+' else "sub r0, r2"
+        res += "add r0, r2" if node.op == '+' else "sub r0, r2" # mul/div analog
         return res
+    return ""
 
 def generate_asm(statements, is_sub_block=False):
     global if_label_count
@@ -249,33 +266,29 @@ def generate_asm(statements, is_sub_block=False):
         if isinstance(stmt, LabelNode):
             asm.append(f"{stmt.name}:")
         elif isinstance(stmt, AssignNode):
-            # 1. WERT BERECHNEN (Entweder String-Adresse oder Ausdruck)
+            # 1. Wert berechnen
             if isinstance(stmt.value, StringNode):
                 str_label = f"str_const_{len(strings_to_embed)}"
                 strings_to_embed.append((str_label, stmt.value.value))
                 asm.append(f"movi r0, {str_label}")
             else:
-                # NUR hier rufen wir generate_expression_asm auf!
                 asm.append(generate_expression_asm(stmt.value))
             
-            # Wert in r10 zwischenspeichern
-            asm.append("mov r10, r0") 
+            asm.append("mov r10, r0") # Wert retten
             
-            # 2. ZIELADRESSE BESTIMMEN
+            # 2. Zieladresse bestimmen
             if isinstance(stmt.target, NumberNode):
                 asm.append(f"movi r1, {hex(stmt.target.value)}")
             elif isinstance(stmt.target, DerefNode):
-                asm.append(generate_expression_asm(stmt.target.target)) 
-                asm.append("mov r1, r0\npeek r0, r1\nmov r1, r0") 
+                # Wir holen die Adresse, auf die der Pointer zeigt (immer 16-bit!)
+                asm.append(f"movi r1, {hex(stmt.target.target.value)}")
+                asm.append("movi r2, 0") # Adressen sind immer 16-bit
+                asm.append("peek r0, r1, r2")
+                asm.append("mov r1, r0")
 
-            # 3. MODUS FESTLEGEN (r2)
-            # Strings sind immer 16-Bit Adressen (Mode 0)
-            if not isinstance(stmt.value, StringNode) and hasattr(stmt.value, 'size') and stmt.value.size == 8:
-                asm.append("movi r2, 1") # 8-Bit
-            else:
-                asm.append("movi r2, 0") # 16-Bit
-                
-            # Finaler Poke
+            # 3. Schreiben mit richtigem Modus
+            mode = 1 if stmt.size == 8 else 0
+            asm.append(f"movi r2, {mode}")
             asm.append("mov r0, r10") 
             asm.append("poke r0, r1, r2")
 
@@ -344,9 +357,8 @@ def generate_expression_asm(node):
         return f"movi r0, {hex(node.value)}"
     
     if isinstance(node, DerefNode):
-        # r1 = Adresse, dann r0 = [r1] (peek)
-        # Beachte: node.target ist wieder ein Node (meist NumberNode)
-        return f"movi r1, {hex(node.target.value)}\npeek r0, r1"
+        mode = 1 if node.size == 8 else 0
+        return f"movi r1, {hex(node.target.value)}\nmovi r2, {mode}\npeek r0, r1, r2"
 
     if isinstance(node, BinOpNode):
         # 1. Linke Seite (Ergebnis in r0)
@@ -414,10 +426,12 @@ if __name__ == "__main__":
     if len(bytecode) > 512:
         print(f"Warnung: {input_file} ist mit {len(bytecode)} Bytes zu groß für einen Sektor!")
 
+    padded_bytecode = bytecode.ljust(512, b'\x00')
+
     try:
         with open("disk.bin", "r+b") as f:
             f.seek(target_sector * 512)
-            f.write(bytecode)
+            f.write(padded_bytecode)
         print(f"Erfolg! {input_file} wurde in Sektor {target_sector} geschrieben.")
     except FileNotFoundError:
         print("Fehler: disk.bin existiert nicht.")

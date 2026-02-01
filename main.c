@@ -1,44 +1,33 @@
 #org 0x400
 
-0x87D0 = 0x8000;
-clear_loop:
-if $0x87D0 != 0x87D0 {
-    $0x87D0 = ' ';
-    0x87D0 = $0x87D0 + 1;
-    goto clear_loop;
-}
+uint8 0x87D0 = 1;
+uint16 0x87D2 = 0x8000;
 
-0x87D0 = "Kernel!";
-0x87D2 = 0x8000;
-out 0x2, $0x87D2;
+mainloop:
+if uint8 $0x87D0 == 1 {
+    uint8 0x87D1 = uint8 $0xFFFF;
 
-print:
-    0x87D4 = $0x87D0; 
+    if uint8 $0x87D1 != 0 {
+        if uint8 $0x87D1 == 'q' {
+            goto end_mainloop;
+        }
 
-    if $0x87D4 == 0 {
-        goto done;
+        uint8 $0x87D2 = uint8 $0x87D1;
+        if uint16 $0x87D2 != 0x87CF {
+            uint16 0x87D2 = uint16 $0x87D2 + 1;
+        }
+
+
     }
 
-    $0x87D2 = $0x87D4; 
-
-    0x87D0 = 0x87D0 + 1;
-    0x87D2 = 0x87D2 + 1;
-    goto print;
-
-0xB100 = 1;
-out 0x2, $0xB100;
-
-loop:
-if $0x7000 == 1 {
-    if $0xFFFF == 113 {
-        0x7000 = 0;
-    }
-    goto loop;
+    goto mainloop;
 }
+end_mainloop:
 
-goto 0xFFFF;
-
+out 0x1, 'D';
+out 0x1, 'o';
+out 0x1, 'n';
+out 0x1, 'e';
+out 0x1, 10;
 done:
-0xB102 = 2;
-out 0x2, $0xB102;
 goto done;

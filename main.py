@@ -174,14 +174,26 @@ isa = {
     0xF: push
 }
 
+last_vram_state = bytearray(2000)
+char_cache = {}
+
 def update_screen(screen, memory, vga_font):
-    for i in range(2000): 
-        char_code = memory[VGA_START + i]
-        if 32 <= char_code <= 126:
-            char_img = vga_font.render(chr(char_code), True, (0, 255, 0))
+    global last_vram_state
+    vram_data = memory[VGA_START:VGA_END+1]
+    
+    for i in range(2000):
+        char_code = vram_data[i]
+
+        if char_code != last_vram_state[i]:
+            last_vram_state[i] = char_code
+            
             x = (i % 80) * 10
             y = (i // 80) * 16
-            screen.blit(char_img, (x, y))
+
+            pygame.draw.rect(screen, (0, 0, 0), (x, y, 10, 16))
+            
+            if char_code in char_cache:
+                screen.blit(char_cache[char_code], (x, y))
 
 def fetch():
     pc_val = regs[15]
@@ -255,7 +267,6 @@ def power(screen, clock, vga_font):
                 if event.type == pygame.KEYUP:
                     memory[0xFFFF] = 0
 
-            screen.fill((0, 0, 0))
             update_screen(screen, memory, vga_font)
             pygame.display.flip()
 
@@ -270,6 +281,8 @@ if __name__ == "__main__":
     screen = pygame.display.set_mode((800, 400))
     clock = pygame.time.Clock()
     vga_font = pygame.font.SysFont("Courier New", 16)
+    for i in range(32, 127):
+        char_cache[i] = vga_font.render(chr(i), True, (0, 255, 0))
 
     try:
         reboot, msg = power(screen, clock, vga_font)
