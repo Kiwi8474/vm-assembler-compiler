@@ -6,9 +6,10 @@ from assembler import assemble
 
 # --- AST NODES ---
 class NumberNode:
-    def __init__(self, value):
-        self.value = int(value, 0)
-    def __repr__(self): return f"Num({self.value})"
+    def __init__(self, value, size=16): # Standard ist 16
+        self.value = int(value, 0) if isinstance(value, str) else value
+        self.size = size
+    def __repr__(self): return f"Num({self.value}, {self.size}bit)"
 
 class DerefNode:
     def __init__(self, target_node):
@@ -68,6 +69,11 @@ class SaveNode:
         self.sector = sector
         self.address = address
 
+class StringNode:
+    def __init__(self, value):
+        self.value = value.strip('"') # Anführungszeichen wegwerfen
+    def __repr__(self): return f"String({self.value})"
+
 # --- TOKENIZER ---
 TOKEN_SPEC = [
     ('DIRECTIVE', r'#[A-Za-z_]+'),
@@ -87,6 +93,8 @@ TOKEN_SPEC = [
     ('OUT', r'out\b'),
     ('LOAD', r'load\b'),
     ('SAVE', r'save\b'),
+    ('CHAR', r"'.'"),
+    ('STRING',     r'"[^"]*"'),
     ('LABEL',     r'[A-Za-z_][A-Za-z0-9_]*:'),
     ('NAME',      r'[A-Za-z_][A-Za-z0-9_]*'),
     ('COMMA',     r','),
@@ -121,7 +129,12 @@ class Parser:
 
     def parse_factor(self):
         token = self.peek_token()
-        if token[0] == 'LPAREN':
+        if token[0] == 'CHAR':
+            val = ord(self.eat('CHAR')[1][1])
+            return NumberNode(val, size=8)
+        elif token[0] == 'STRING':
+            return StringNode(self.eat('STRING')[1])
+        elif token[0] == 'LPAREN':
             self.eat('LPAREN')
             node = self.parse_expression() # Rekursion! Wir parsen alles in der Klammer
             self.eat('RPAREN')
@@ -132,7 +145,7 @@ class Parser:
             # return DerefNode(self.parse_factor()) 
             return DerefNode(NumberNode(self.eat('NUMBER')[1]))
         elif token[0] == 'NUMBER':
-            return NumberNode(self.eat('NUMBER')[1])
+            return NumberNode(self.eat('NUMBER')[1], size=16)
         raise Exception(f"Faktor Fehler: {token}")
 
     def parse_expression(self):
@@ -209,7 +222,7 @@ def generate_expression_asm(node):
     if isinstance(node, NumberNode):
         return f"movi r0, {hex(node.value)}"
     if isinstance(node, DerefNode):
-        return f"movi r1, {hex(node.target.value)}\npeek r0, r1"
+        return f"movi r1, {hex(node.target.value)}\nmovi r2, 0\npeek r0, r1, r2"
     if isinstance(node, BinOpNode):
         left = generate_expression_asm(node.left)
         res = f"{left}\nmov r3, r0\n"
@@ -221,6 +234,7 @@ def generate_expression_asm(node):
 def generate_asm(statements, is_sub_block=False):
     global if_label_count
     asm = []
+    strings_to_embed = []
     
     # ORG nur ganz am Anfang schreiben, nicht in Unterblöcken!
     if not is_sub_block:
@@ -235,28 +249,36 @@ def generate_asm(statements, is_sub_block=False):
         if isinstance(stmt, LabelNode):
             asm.append(f"{stmt.name}:")
         elif isinstance(stmt, AssignNode):
-            # 1. Wert berechnen (z.B. 65 oder 0xFF)
-            asm.append(generate_expression_asm(stmt.value))
-            asm.append("mov r10, r0") # Wert SICHER in r10 parken
+            # 1. WERT BERECHNEN (Entweder String-Adresse oder Ausdruck)
+            if isinstance(stmt.value, StringNode):
+                str_label = f"str_const_{len(strings_to_embed)}"
+                strings_to_embed.append((str_label, stmt.value.value))
+                asm.append(f"movi r0, {str_label}")
+            else:
+                # NUR hier rufen wir generate_expression_asm auf!
+                asm.append(generate_expression_asm(stmt.value))
             
-            # 2. Zieladresse bestimmen
+            # Wert in r10 zwischenspeichern
+            asm.append("mov r10, r0") 
+            
+            # 2. ZIELADRESSE BESTIMMEN
             if isinstance(stmt.target, NumberNode):
-                # Direkte Adresse (z.B. 0x8000)
                 asm.append(f"movi r1, {hex(stmt.target.value)}")
             elif isinstance(stmt.target, DerefNode):
-                # Indirekte Adresse (z.B. $0x8000)
-                # Wir berechnen den Ausdruck INNERHALB des $...
                 asm.append(generate_expression_asm(stmt.target.target)) 
-                # Jetzt steht in r0 die Adresse (z.B. 0x8000)
-                # Wir müssen JETZT peeken, um die ECHTE Zieladresse zu kriegen
-                asm.append("mov r1, r0")
-                asm.append("peek r0, r1") 
-                # Jetzt steht in r0 die 65! Das ist unser Ziel.
-                asm.append("mov r1, r0") 
+                asm.append("mov r1, r0\npeek r0, r1\nmov r1, r0") 
 
-            # 3. Finaler Poke
-            asm.append("mov r0, r10") # Den Wert (0xFF) zurückholen
-            asm.append("poke r0, r1") # Wert (0xFF) an Adresse (65)
+            # 3. MODUS FESTLEGEN (r2)
+            # Strings sind immer 16-Bit Adressen (Mode 0)
+            if not isinstance(stmt.value, StringNode) and hasattr(stmt.value, 'size') and stmt.value.size == 8:
+                asm.append("movi r2, 1") # 8-Bit
+            else:
+                asm.append("movi r2, 0") # 16-Bit
+                
+            # Finaler Poke
+            asm.append("mov r0, r10") 
+            asm.append("poke r0, r1, r2")
+
         elif isinstance(stmt, GotoNode):
             target = hex(stmt.target) if isinstance(stmt.target, int) else stmt.target
             asm.append(f"movi r15, {target}")
@@ -305,6 +327,14 @@ def generate_asm(statements, is_sub_block=False):
     # Halt-Befehl nur am Ende des Hauptprogramms
     if not is_sub_block:
         asm.append("movi r15, 0x10000") # Dein System-Halt
+
+        if strings_to_embed:
+            asm.append("\n; --- String Data Section ---")
+            for label, text in strings_to_embed:
+                asm.append(f"{label}:")
+                # Jedes Zeichen in Hex-Bytes umwandeln + Null-Terminator
+                chars = ", ".join([hex(ord(c)) for c in text])
+                asm.append(f".db {chars}, 0x00")
         
     return "\n".join(asm)
 

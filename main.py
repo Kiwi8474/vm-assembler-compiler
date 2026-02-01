@@ -2,10 +2,17 @@ import os
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 import pygame
 import sys
+import time
 
 DISK = "disk.bin"
-BIOS = bytearray(b'\x2E\xAF\xFF\x20\x02\x00\xC0\x00\x00\x2F\x02\x00')
+BIOS = bytes([
+    0x20, 0x00, 0x01,  # movi r0, 0x200
+    0x2C, 0x10, 0x00,  # movi r1, 0x00
+    0xC1, 0x00, 0x00,  # load r1, r0
+    0x10, 0xF0, 0x00   # mov r15, r0
+])
 VGA_START = 0x8000
+VGA_END = 0x87CF
 
 regs = [0] * 16
 
@@ -84,15 +91,36 @@ def jne(reg_a, reg_b, reg_c):
     return False
 
 def peek(reg_a, reg_b, reg_c):
-    regs[reg_a] = memory[regs[reg_b]]
+    addr = regs[reg_b]
+    mode = regs[reg_c]
+
+    if mode == 1:
+        # 8-Bit Modus
+        regs[reg_a] = memory[addr]
+    else:
+        # 16-Bit Modus
+        high_byte = memory[addr]
+        low_byte = memory[addr + 1]
+        regs[reg_a] = (high_byte << 8) | low_byte
 
 def poke(reg_a, reg_b, reg_c):
-    memory[regs[reg_b]] = regs[reg_a]
+    val = regs[reg_a]
+    addr = regs[reg_b]
+    mode = regs[reg_c]
+
+    if mode == 1:
+        # 8-Bit Modus
+        memory[addr] = val & 0xFF
+    else:
+        # 16-Bit Modus
+        memory[addr] = (val >> 8) & 0xFF
+        memory[addr + 1] = val & 0xFF
 
 def load(reg_a, reg_b, reg_c):
+    sector = regs[reg_a]
     start_addr = regs[reg_b]
-    disk_start = reg_a * 512
 
+    disk_start = sector * 512
     chunk = disk_content[disk_start : disk_start + 512]
 
     if len(chunk) < 512:
@@ -201,26 +229,35 @@ def power(screen, clock, vga_font):
         regs[i] = 0
 
     cycles = 0
+    last_time = time.time()
+    ips = 0
     running = True
     while running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                dump()
-                sys.exit()
+        current_time = time.time()
+        if current_time - last_time >= 1.0:
+            ips = cycles  # Die Zyklen der letzten Sekunde
+            cycles = 0    # Reset für die nächste Sekunde
+            last_time = current_time
+            # Optionale Ausgabe in der Konsole oder im Fenstertitel
+            pygame.display.set_caption(f"VM | {ips / 1000:.2f} kHz")
 
-            if event.type == pygame.KEYDOWN:
-                if len(event.unicode) > 0:
-                    memory[0xFFFF] = ord(event.unicode)
-            
-            if event.type == pygame.KEYUP:
-                memory[0xFFFF] = 0
+        if cycles % 5000 == 0:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    dump()
+                    sys.exit()
 
-        if cycles % 100 == 0:
+                if event.type == pygame.KEYDOWN:
+                    if len(event.unicode) > 0:
+                        memory[0xFFFF] = ord(event.unicode)
+                
+                if event.type == pygame.KEYUP:
+                    memory[0xFFFF] = 0
+
             screen.fill((0, 0, 0))
             update_screen(screen, memory, vga_font)
             pygame.display.flip()
-            clock.tick(60)
 
         if regs[15] <= 0xFFFF - 3:
             cycle()

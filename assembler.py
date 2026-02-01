@@ -52,8 +52,9 @@ def assemble_line(line, labels):
 def assemble(filename):
     labels = {}
     current_address = 0x0200
-    instructions = []
+    lines_to_process = []
 
+    # 1. Pass: Labels sammeln
     with open(filename, "r") as f:
         for line in f:
             line = line.strip().split(";")[0]
@@ -63,13 +64,24 @@ def assemble(filename):
                 current_address = int(line.split()[1], 0)
             elif line.endswith(":"):
                 labels[line[:-1]] = current_address
+            elif line.startswith(".db"):
+                # Hier berechnen wir, wie viele Bytes dazukommen
+                data_parts = line[3:].split(",")
+                lines_to_process.append((current_address, line))
+                current_address += len(data_parts) # Jedes Komma-Element ist 1 Byte
             else:
-                instructions.append((current_address, line))
-                current_address += 3
+                lines_to_process.append((current_address, line))
+                current_address += 3 # Normale Befehle sind 3 Bytes
 
     binary = b""
-    for addr, line in instructions:
-        binary += assemble_line(line, labels) 
+    for addr, line in lines_to_process:
+        if line.startswith(".db"):
+            # Direkt Bytes schreiben
+            data_parts = line[3:].split(",")
+            for val_str in data_parts:
+                binary += bytes([int(val_str.strip(), 0)])
+        else:
+            binary += assemble_line(line, labels)
     
     return binary
 
