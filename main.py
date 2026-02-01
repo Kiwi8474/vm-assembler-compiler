@@ -6,17 +6,17 @@ import time
 
 DISK = "disk.bin"
 BIOS = bytes([
-    0x20, 0x00, 0x01,
-    0x2C, 0x10, 0x00,
-    0xC1, 0x00, 0x00,
-    0x10, 0xF0, 0x00
+    0x20, 0x00, 0x00,
+    0x21, 0x02, 0x00,
+    0xC0, 0x10, 0x00,
+    0x2F, 0x02, 0x00
 ])
 VGA_START = 0x8000
 VGA_END = 0x87CF
 
 regs = [0] * 16
-
 memory = bytearray(65536)
+key_buffer = []
 
 # ===============================================================================
 # Memory Map
@@ -227,6 +227,8 @@ def execute(opcode, reg_a, reg_b, reg_c, imm):
     if not jumped: regs[15] += 3
 
 def cycle():
+    if memory[0xFFFF] == 0 and key_buffer:
+        memory[0xFFFF] = key_buffer.pop(0)
     execute(*decode(*fetch()))
 
 def power(screen, clock, vga_font):
@@ -253,7 +255,7 @@ def power(screen, clock, vga_font):
             else:
                 pygame.display.set_caption(f"VM | {ips} Hz")
 
-        if cycles % 5000 == 0:
+        if cycles % 100 == 0:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     pygame.quit()
@@ -262,19 +264,17 @@ def power(screen, clock, vga_font):
 
                 if event.type == pygame.KEYDOWN:
                     if len(event.unicode) > 0:
-                        memory[0xFFFF] = ord(event.unicode)
-                
-                if event.type == pygame.KEYUP:
-                    memory[0xFFFF] = 0
+                        key_buffer.append(ord(event.unicode))
 
+        if cycles % 5000 == 0:
             update_screen(screen, memory, vga_font)
             pygame.display.flip()
 
-        if regs[15] <= 0xFFFF - 3:
+        if regs[15] <= 0xFFFD:
             cycle()
             cycles += 1
         else:
-                return False, "PC out of bounds. Shutting Down."
+            return False, "PC out of bounds. Shutting Down."
 
 if __name__ == "__main__":
     pygame.init()

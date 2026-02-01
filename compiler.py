@@ -36,12 +36,7 @@ class LabelNode:
 
 class GotoNode:
     def __init__(self, target):
-        if isinstance(target, str) and target.startswith("0x"):
-            self.target = int(target, 0)
-        elif target.isdigit():
-            self.target = int(target)
-        else:
-            self.target = target
+        self.target = target
 
 class DirectiveNode:
     def __init__(self, name, value):
@@ -102,6 +97,27 @@ TOKEN_SPEC = [
     ('WHITESPACE', r'\s+'),
 ]
 
+def preprocess_includes(code, base_path="."):
+    include_pattern = r'#include\s+"([^"]+)"'
+    
+    def replace_match(match):
+        filename = match.group(1)
+        full_path = os.path.join(base_path, filename)
+        if os.path.exists(full_path):
+            with open(full_path, "r") as f:
+                included_code = f.read()
+            return preprocess_includes(included_code, os.path.dirname(full_path))
+        else:
+            print(f"Warnung: Include-Datei '{filename}' nicht gefunden!")
+            return f"// Fehler: {filename} nicht gefunden"
+
+    return re.sub(include_pattern, replace_match, code)
+
+def strip_comments(code):
+    code = re.sub(r'/\*.*?\*/', '', code, flags=re.DOTALL)
+    code = re.sub(r'//.*', '', code)
+    return code
+
 def tokenize(code):
     tokens = []
     tok_regex = '|'.join('(?P<%s>%s)' % pair for pair in TOKEN_SPEC)
@@ -123,12 +139,13 @@ class Parser:
         token = self.peek_token()
         if not token: raise Exception("Unerwartetes Ende!")
         if expected_type and token[0] != expected_type:
-            raise Exception(f"Erwartete {expected_type}, bekam {token[0]}")
+            raise Exception(f"Erwartete {expected_type}, bekam {token[0]}, bei Quellcode {token[1]}")
         self.pos += 1
         return token
 
     def parse_factor(self, size=16):
         token = self.peek_token()
+        if not token: return None
 
         current_size = 16
         if token[0] == 'TYPE':
@@ -141,10 +158,14 @@ class Parser:
             return NumberNode(val, size=8)
         elif token[0] == 'DEREF':
             self.eat('DEREF')
-            num_node = NumberNode(self.eat('NUMBER')[1])
-            return DerefNode(num_node, size=current_size)
+            addr = self.parse_factor() 
+            return DerefNode(addr, size=current_size)
         elif token[0] == 'NUMBER':
             return NumberNode(self.eat('NUMBER')[1], size=current_size)
+        elif token[0] == 'NAME':
+            return self.eat('NAME')[1] 
+
+        raise Exception(f"Unerwartetes Token im Factor: {token}")
 
     def parse_expression(self):
         node = self.parse_factor()
@@ -155,16 +176,16 @@ class Parser:
 
     def parse_statement(self):
         t = self.peek_token()
+        if t is None: return None
 
-        current_size = 16
-        if t[0] == 'TYPE':
-            type_str = self.eat('TYPE')[1]
-            current_size = 8 if type_str == 'uint8' else 16
-            t = self.peek_token()
-
-        if t[0] == 'DIRECTIVE': return self.parse_directive()
-        if t[0] == 'LABEL': return LabelNode(self.eat('LABEL')[1])
-        if t[0] == 'GOTO': return self.parse_goto()
+        if t[0] == 'LABEL': 
+            return LabelNode(self.eat('LABEL')[1])
+        if t[0] == 'DIRECTIVE': 
+            return self.parse_directive()
+        if t[0] == 'GOTO': 
+            return self.parse_goto()
+        if t[0] == 'IF': 
+            return self.parse_if()
         if t[0] == 'OUT':
             self.eat('OUT')
             port = self.parse_expression()
@@ -172,18 +193,26 @@ class Parser:
             data = self.parse_expression()
             self.eat('SEMICOLON')
             return OutNode(port, data)
-        if t[0] in ['LOAD', 'SAVE']:
-            type = self.eat()[0]
-            sector = self.parse_expression()
-            self.eat('COMMA')
-            address = self.parse_expression()
-            self.eat('SEMICOLON')
-            return LoadNode(sector, address) if type == 'LOAD' else SaveNode(sector, address)
-        if t[0] == 'IF': return self.parse_if()
+
+        current_size = 16
+        if t[0] == 'TYPE':
+            type_str = self.eat('TYPE')[1]
+            current_size = 8 if type_str == 'uint8' else 16
+            t = self.peek_token()
+
         if t[0] in ['NUMBER', 'DEREF']:
             node = self.parse_assignment(current_size)
             self.eat('SEMICOLON')
             return node
+
+        if t[0] in ['LOAD', 'SAVE']:
+            stmt_type = self.eat()[0]
+            sector = self.parse_expression()
+            self.eat('COMMA')
+            address = self.parse_expression()
+            self.eat('SEMICOLON')
+            return LoadNode(sector, address) if stmt_type == 'LOAD' else SaveNode(sector, address)
+        
         raise Exception(f"Syntax Fehler bei {t}")
 
     def parse_assignment(self, size):
@@ -197,7 +226,7 @@ class Parser:
 
     def parse_goto(self):
         self.eat('GOTO')
-        target = self.eat()[1]
+        target = self.parse_expression()
         self.eat('SEMICOLON')
         return GotoNode(target)
 
@@ -224,23 +253,6 @@ class Parser:
         return stmts
 
 if_label_count = 0
-
-def generate_expression_asm(node):
-    if isinstance(node, NumberNode):
-        return f"movi r0, {hex(node.value)}"
-    
-    if isinstance(node, DerefNode):
-        mode = 1 if node.size == 8 else 0
-        return f"movi r1, {hex(node.target.value)}\nmovi r2, {mode}\npeek r0, r1, r2"
-    
-    if isinstance(node, BinOpNode):
-        left = generate_expression_asm(node.left)
-        res = f"{left}\nmov r3, r0\n"
-        res += generate_expression_asm(node.right)
-        res += f"\nmov r2, r0\nmov r0, r3\n"
-        res += "add r0, r2" if node.op == '+' else "sub r0, r2"
-        return res
-    return ""
 
 def generate_asm(statements, is_sub_block=False):
     global if_label_count
@@ -284,20 +296,25 @@ def generate_asm(statements, is_sub_block=False):
             asm.append("mov r0, r10") 
             asm.append("poke r0, r1, r2")
 
-        elif isinstance(stmt, GotoNode):
-            target = hex(stmt.target) if isinstance(stmt.target, int) else stmt.target
-            asm.append(f"movi r15, {target}")
+        if isinstance(stmt, GotoNode):
+            if isinstance(stmt.target, str):
+                asm.append(f"movi r15, {stmt.target}")
+            else:
+                asm.append(generate_expression_asm(stmt.target))
+                asm.append("mov r15, r0")
         elif isinstance(stmt, OutNode):
             asm.append(generate_expression_asm(stmt.port))
-            asm.append("mov r5, r0")
+            asm.append("push r0")
             asm.append(generate_expression_asm(stmt.data))
             asm.append("mov r6, r0")
+            asm.append("pop r5")
             asm.append("out r5, r6")
         elif isinstance(stmt, (LoadNode, SaveNode)):
             asm.append(generate_expression_asm(stmt.sector))
-            asm.append("mov r11, r0")
+            asm.append("push r0")
             asm.append(generate_expression_asm(stmt.address))
             asm.append("mov r12, r0")
+            asm.append("pop r11")
             asm.append("movi r13, 0")
             cmd = "load" if isinstance(stmt, LoadNode) else "save"
             asm.append(f"{cmd} r11, r12, r13")
@@ -321,7 +338,7 @@ def generate_asm(statements, is_sub_block=False):
             asm.append(f"{label_end}:")
 
     if not is_sub_block:
-        asm.append("movi r15, 0x10000")
+        asm.append("movi r15, 0xFFFF")
 
         if strings_to_embed:
             asm.append("\n; --- String Data Section ---")
@@ -333,35 +350,20 @@ def generate_asm(statements, is_sub_block=False):
     return "\n".join(asm)
 
 def generate_expression_asm(node):
-    """Rekursive Funktion, die ASM für Rechnungen baut"""
     if isinstance(node, NumberNode):
         return f"movi r0, {hex(node.value)}"
     
     if isinstance(node, DerefNode):
         mode = 1 if node.size == 8 else 0
-        return f"movi r1, {hex(node.target.value)}\nmovi r2, {mode}\npeek r0, r1, r2"
+        addr_asm = generate_expression_asm(node.target)
+        return f"{addr_asm}\nmov r1, r0\nmovi r2, {mode}\npeek r0, r1, r2"
 
     if isinstance(node, BinOpNode):
         left_asm = generate_expression_asm(node.left)
-
-        save_asm = "mov r3, r0"
-
         right_asm = generate_expression_asm(node.right)
 
-        prep_op = "mov r2, r0\nmov r0, r3" 
-        
-        if node.op == '+':
-            op_asm = "add r0, r2"
-        elif node.op == '-':
-            op_asm = "sub r0, r2"
-        elif node.op == '*':
-            op_asm = "mul r0, r2"
-        elif node.op == '/':
-            op_asm = "div r0, r2"
-        else:
-            op_asm = "; OP nicht implementiert"
-            
-        return f"{left_asm}\n{save_asm}\n{right_asm}\n{prep_op}\n{op_asm}"
+        return f"{left_asm}\npush r0\n{right_asm}\nmov r2, r0\npop r3\nmov r0, r3\n" + \
+               ("add r0, r2" if node.op == '+' else "sub r0, r2" if node.op == '-' else "mul r0, r2" if node.op == '*' else "div r0, r2")
 
     return ""
 
@@ -387,7 +389,10 @@ if __name__ == "__main__":
     target_sector = int(sys.argv[2])
 
     with open(input_file, "r") as f:
-        source_code = f.read()
+        raw_code = f.read()
+
+    clean_code = strip_comments(raw_code)
+    source_code = preprocess_includes(clean_code, os.path.dirname(input_file))
 
     tokens = tokenize(source_code)
     parser = Parser(tokens)

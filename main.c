@@ -1,29 +1,30 @@
 #org 0x400
 #sectors 2
 
+out 0x1, 'H';
+out 0x1, 'i';
+out 0x1, 10;
+
 uint8 0x87D0 = 1;
 uint16 0x87D2 = 0x8000;
 
 mainloop:
 if uint8 $0x87D0 == 1 {
-    uint8 0x87D1 = uint8 $0xFFFF;
-
-    if uint8 $0x87D1 != 0 {
-        if uint8 $0x87D1 == 'q' {
-            goto end_mainloop;
+    if uint8 $0xFFFF != 0 {
+        if uint8 $0xFFFF == 'q' {
+            uint8 0x87D0 = 0;
         }
 
-        uint8 $0x87D2 = uint8 $0x87D1;
+        uint8 $0x87D2 = uint8 $0xFFFF;
         if uint16 $0x87D2 != 0x87CF {
             uint16 0x87D2 = uint16 $0x87D2 + 1;
         }
 
-
+        uint8 0xFFFF = 0;
     }
 
     goto mainloop;
 }
-end_mainloop:
 
 out 0x1, 'D';
 out 0x1, 'o';
