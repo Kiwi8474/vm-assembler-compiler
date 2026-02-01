@@ -4,9 +4,8 @@ import sys
 import re
 from assembler import assemble
 
-# --- AST NODES ---
 class NumberNode:
-    def __init__(self, value, size=16): # Standard ist 16
+    def __init__(self, value, size=16):
         self.value = int(value, 0) if isinstance(value, str) else value
         self.size = size
     def __repr__(self): return f"Num({self.value}, {self.size}bit)"
@@ -26,7 +25,7 @@ class BinOpNode:
 
 class AssignNode:
     def __init__(self, target_node, value_node, size=16):
-        self.target = target_node  # Kann jetzt NumberNode ODER DerefNode sein!
+        self.target = target_node
         self.value = value_node
         self.size = size
     def __repr__(self): return f"Assign({self.target} = {self.value}, {self.size}bit)"
@@ -73,10 +72,9 @@ class SaveNode:
 
 class StringNode:
     def __init__(self, value):
-        self.value = value.strip('"') # Anführungszeichen wegwerfen
+        self.value = value.strip('"')
     def __repr__(self): return f"String({self.value})"
 
-# --- TOKENIZER ---
 TOKEN_SPEC = [
     ('TYPE',       r'uint8\b|uint16\b'),
     ('DIRECTIVE', r'#[A-Za-z_]+'),
@@ -113,7 +111,6 @@ def tokenize(code):
         tokens.append((kind, mo.group()))
     return tokens
 
-# --- PARSER ---
 class Parser:
     def __init__(self, tokens):
         self.tokens = tokens
@@ -132,22 +129,20 @@ class Parser:
 
     def parse_factor(self, size=16):
         token = self.peek_token()
-    
-        # 1. Check, ob ein Typ-Cast kommt (z.B. uint8 $)
-        current_size = 16 # Default
+
+        current_size = 16
         if token[0] == 'TYPE':
             type_str = self.eat('TYPE')[1]
             current_size = 8 if type_str == 'uint8' else 16
-            token = self.peek_token() # Schau dir das nächste Token an ($ oder Nummer)
+            token = self.peek_token()
 
-        # 2. Bestehende Logik, aber mit current_size
         if token[0] == 'CHAR':
             val = ord(self.eat('CHAR')[1][1])
             return NumberNode(val, size=8)
         elif token[0] == 'DEREF':
             self.eat('DEREF')
             num_node = NumberNode(self.eat('NUMBER')[1])
-            return DerefNode(num_node, size=current_size) # Hier die Größe nutzen!
+            return DerefNode(num_node, size=current_size)
         elif token[0] == 'NUMBER':
             return NumberNode(self.eat('NUMBER')[1], size=current_size)
 
@@ -172,9 +167,9 @@ class Parser:
         if t[0] == 'GOTO': return self.parse_goto()
         if t[0] == 'OUT':
             self.eat('OUT')
-            port = self.parse_expression() # Welcher Port?
+            port = self.parse_expression()
             self.eat('COMMA')
-            data = self.parse_expression() # Welche Daten?
+            data = self.parse_expression()
             self.eat('SEMICOLON')
             return OutNode(port, data)
         if t[0] in ['LOAD', 'SAVE']:
@@ -214,7 +209,7 @@ class Parser:
     def parse_if(self):
         self.eat('IF')
         left = self.parse_expression()
-        op = self.eat()[1] # == oder !=
+        op = self.eat()[1]
         right = self.parse_expression()
         self.eat('LBRACE')
         block = []
@@ -228,7 +223,6 @@ class Parser:
         while self.peek_token(): stmts.append(self.parse_statement())
         return stmts
 
-# --- GENERATOR ---
 if_label_count = 0
 
 def generate_expression_asm(node):
@@ -244,7 +238,7 @@ def generate_expression_asm(node):
         res = f"{left}\nmov r3, r0\n"
         res += generate_expression_asm(node.right)
         res += f"\nmov r2, r0\nmov r0, r3\n"
-        res += "add r0, r2" if node.op == '+' else "sub r0, r2" # mul/div analog
+        res += "add r0, r2" if node.op == '+' else "sub r0, r2"
         return res
     return ""
 
@@ -252,8 +246,7 @@ def generate_asm(statements, is_sub_block=False):
     global if_label_count
     asm = []
     strings_to_embed = []
-    
-    # ORG nur ganz am Anfang schreiben, nicht in Unterblöcken!
+
     if not is_sub_block:
         found_org = False
         for s in statements:
@@ -265,8 +258,10 @@ def generate_asm(statements, is_sub_block=False):
     for stmt in statements:
         if isinstance(stmt, LabelNode):
             asm.append(f"{stmt.name}:")
+        elif isinstance(stmt, DirectiveNode):
+            if stmt.name == "#sectors":
+                continue
         elif isinstance(stmt, AssignNode):
-            # 1. Wert berechnen
             if isinstance(stmt.value, StringNode):
                 str_label = f"str_const_{len(strings_to_embed)}"
                 strings_to_embed.append((str_label, stmt.value.value))
@@ -274,19 +269,16 @@ def generate_asm(statements, is_sub_block=False):
             else:
                 asm.append(generate_expression_asm(stmt.value))
             
-            asm.append("mov r10, r0") # Wert retten
-            
-            # 2. Zieladresse bestimmen
+            asm.append("mov r10, r0")
+
             if isinstance(stmt.target, NumberNode):
                 asm.append(f"movi r1, {hex(stmt.target.value)}")
             elif isinstance(stmt.target, DerefNode):
-                # Wir holen die Adresse, auf die der Pointer zeigt (immer 16-bit!)
                 asm.append(f"movi r1, {hex(stmt.target.target.value)}")
-                asm.append("movi r2, 0") # Adressen sind immer 16-bit
+                asm.append("movi r2, 0")
                 asm.append("peek r0, r1, r2")
                 asm.append("mov r1, r0")
 
-            # 3. Schreiben mit richtigem Modus
             mode = 1 if stmt.size == 8 else 0
             asm.append(f"movi r2, {mode}")
             asm.append("mov r0, r10") 
@@ -296,56 +288,45 @@ def generate_asm(statements, is_sub_block=False):
             target = hex(stmt.target) if isinstance(stmt.target, int) else stmt.target
             asm.append(f"movi r15, {target}")
         elif isinstance(stmt, OutNode):
-            # Port in r5, Daten in r6 laden (als Beispiel)
             asm.append(generate_expression_asm(stmt.port))
             asm.append("mov r5, r0")
             asm.append(generate_expression_asm(stmt.data))
             asm.append("mov r6, r0")
             asm.append("out r5, r6")
         elif isinstance(stmt, (LoadNode, SaveNode)):
-            # 1. Sektor-Ausdruck berechnen -> r11
             asm.append(generate_expression_asm(stmt.sector))
             asm.append("mov r11, r0")
-            # 2. Adress-Ausdruck berechnen -> r12
             asm.append(generate_expression_asm(stmt.address))
             asm.append("mov r12, r0")
-            # 3. Befehl ausführen (r13 ist einfach ein Dummy/0)
             asm.append("movi r13, 0")
             cmd = "load" if isinstance(stmt, LoadNode) else "save"
             asm.append(f"{cmd} r11, r12, r13")
         elif isinstance(stmt, IfNode):
             if_label_count += 1
             label_end = f"_endif_{if_label_count}"
-            
-            # 1. Linke Seite berechnen -> r5
+
             asm.append(generate_expression_asm(stmt.left))
             asm.append("mov r5, r0")
-            # 2. Rechte Seite berechnen -> r6
             asm.append(generate_expression_asm(stmt.right))
             asm.append("mov r6, r0")
-            
-            # 3. Sprung-Ziel laden
+
             asm.append(f"movi r4, {label_end}")
-            
-            # 4. Vergleich (Invertiert, um den Block zu überspringen!)
+
             if stmt.op == "==":
                 asm.append("jne r5, r6, r4")
             else:
                 asm.append("je r5, r6, r4")
-            
-            # 5. Block-Inhalt (Rekursion!)
+
             asm.append(generate_asm(stmt.block, is_sub_block=True))
             asm.append(f"{label_end}:")
-            
-    # Halt-Befehl nur am Ende des Hauptprogramms
+
     if not is_sub_block:
-        asm.append("movi r15, 0x10000") # Dein System-Halt
+        asm.append("movi r15, 0x10000")
 
         if strings_to_embed:
             asm.append("\n; --- String Data Section ---")
             for label, text in strings_to_embed:
                 asm.append(f"{label}:")
-                # Jedes Zeichen in Hex-Bytes umwandeln + Null-Terminator
                 chars = ", ".join([hex(ord(c)) for c in text])
                 asm.append(f".db {chars}, 0x00")
         
@@ -361,18 +342,12 @@ def generate_expression_asm(node):
         return f"movi r1, {hex(node.target.value)}\nmovi r2, {mode}\npeek r0, r1, r2"
 
     if isinstance(node, BinOpNode):
-        # 1. Linke Seite (Ergebnis in r0)
         left_asm = generate_expression_asm(node.left)
-        
-        # 2. Wir brauchen r0 für die rechte Seite, also r0 -> r3 retten
-        # (Einfaches Register-Management für den Anfang)
+
         save_asm = "mov r3, r0"
-        
-        # 3. Rechte Seite (Ergebnis in r0)
+
         right_asm = generate_expression_asm(node.right)
-        
-        # 4. Rechnen (r3 OP r0 -> r0)
-        # Wir tauschen r0 und r2 für die OP
+
         prep_op = "mov r2, r0\nmov r0, r3" 
         
         if node.op == '+':
@@ -393,45 +368,61 @@ def generate_expression_asm(node):
 def compile(input_file):
     with open(input_file, "r") as f:
         code = f.read()
-    
-    # 1. In Tokens zerlegen
+
     tokens = tokenize(code)
-    
-    # 2. Baum bauen (AST Liste)
+
     parser = Parser(tokens)
-    statements = parser.parse_program() # Holt alle Zeilen!
-    
-    # 3. ASM Generierung
-    # Wir übergeben die Liste der Statements an unseren Generator
+    statements = parser.parse_program()
+
     asm_output = generate_asm(statements)
     
     return asm_output
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Usage: python assembler.py <source.c> <sector>")
+        print("Usage: python compiler.py <source.c> <sector>")
         sys.exit(1)
 
     input_file = sys.argv[1]
     target_sector = int(sys.argv[2])
 
-    asm_code = compile(input_file)
-    asm_file_name = f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.asm"
+    with open(input_file, "r") as f:
+        source_code = f.read()
+
+    tokens = tokenize(source_code)
+    parser = Parser(tokens)
+    statements = parser.parse_program()
+
+    max_sectors = 0
+    for s in statements:
+        if isinstance(s, DirectiveNode) and s.name == "#sectors":
+            max_sectors = s.value
+            break
+
+    asm_code = generate_asm(statements)
+
+    asm_file_name = f"temp_{datetime.datetime.now().strftime('%H%M%S')}.asm"
     with open(asm_file_name, "w") as f:
         f.write(asm_code)
 
     bytecode = assemble(asm_file_name)
     os.remove(asm_file_name)
 
-    if len(bytecode) > 512:
-        print(f"Warnung: {input_file} ist mit {len(bytecode)} Bytes zu groß für einen Sektor!")
+    actual_size = len(bytecode)
+    min_needed_sectors = ((actual_size - 1) // 512 + 1) if actual_size > 0 else 1
 
-    padded_bytecode = bytecode.ljust(512, b'\x00')
+    final_sector_count = max(min_needed_sectors, max_sectors)
+
+    if max_sectors > 0 and min_needed_sectors > max_sectors:
+        print(f"Warnung: {input_file} braucht {min_needed_sectors} Sektoren, aber #sectors ist nur {max_sectors}!")
+
+    target_size = final_sector_count * 512
+    padded_bytecode = bytecode.ljust(target_size, b'\x00')
 
     try:
         with open("disk.bin", "r+b") as f:
             f.seek(target_sector * 512)
             f.write(padded_bytecode)
-        print(f"Erfolg! {input_file} wurde in Sektor {target_sector} geschrieben.")
+        print(f"Erfolg! {input_file} ({actual_size} Bytes) wurde in {final_sector_count} Sektoren geschrieben.")
     except FileNotFoundError:
         print("Fehler: disk.bin existiert nicht.")

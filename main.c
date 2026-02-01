@@ -1,4 +1,5 @@
 #org 0x400
+#sectors 2
 
 uint8 0x87D0 = 1;
 uint16 0x87D2 = 0x8000;

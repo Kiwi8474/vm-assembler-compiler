@@ -6,10 +6,10 @@ import time
 
 DISK = "disk.bin"
 BIOS = bytes([
-    0x20, 0x00, 0x01,  # movi r0, 0x200
-    0x2C, 0x10, 0x00,  # movi r1, 0x00
-    0xC1, 0x00, 0x00,  # load r1, r0
-    0x10, 0xF0, 0x00   # mov r15, r0
+    0x20, 0x00, 0x01,
+    0x2C, 0x10, 0x00,
+    0xC1, 0x00, 0x00,
+    0x10, 0xF0, 0x00
 ])
 VGA_START = 0x8000
 VGA_END = 0x87CF
@@ -95,10 +95,8 @@ def peek(reg_a, reg_b, reg_c):
     mode = regs[reg_c]
 
     if mode == 1:
-        # 8-Bit Modus
         regs[reg_a] = memory[addr]
     else:
-        # 16-Bit Modus
         high_byte = memory[addr]
         low_byte = memory[addr + 1]
         regs[reg_a] = (high_byte << 8) | low_byte
@@ -109,10 +107,8 @@ def poke(reg_a, reg_b, reg_c):
     mode = regs[reg_c]
 
     if mode == 1:
-        # 8-Bit Modus
         memory[addr] = val & 0xFF
     else:
-        # 16-Bit Modus
         memory[addr] = (val >> 8) & 0xFF
         memory[addr + 1] = val & 0xFF
 
@@ -247,11 +243,15 @@ def power(screen, clock, vga_font):
     while running:
         current_time = time.time()
         if current_time - last_time >= 1.0:
-            ips = cycles  # Die Zyklen der letzten Sekunde
-            cycles = 0    # Reset für die nächste Sekunde
+            ips = cycles
+            cycles = 0
             last_time = current_time
-            # Optionale Ausgabe in der Konsole oder im Fenstertitel
-            pygame.display.set_caption(f"VM | {ips / 1000:.2f} kHz")
+            if ips / 1000 >= 1000:
+                pygame.display.set_caption(f"VM | {ips / 1000000:.2f} MHz")
+            elif ips / 1000 >= 1:
+                pygame.display.set_caption(f"VM | {ips / 1000:.2f} kHz")
+            else:
+                pygame.display.set_caption(f"VM | {ips} Hz")
 
         if cycles % 5000 == 0:
             for event in pygame.event.get():

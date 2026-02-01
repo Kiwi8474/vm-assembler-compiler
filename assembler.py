@@ -54,7 +54,6 @@ def assemble(filename):
     current_address = 0x0200
     lines_to_process = []
 
-    # 1. Pass: Labels sammeln
     with open(filename, "r") as f:
         for line in f:
             line = line.strip().split(";")[0]
@@ -65,18 +64,16 @@ def assemble(filename):
             elif line.endswith(":"):
                 labels[line[:-1]] = current_address
             elif line.startswith(".db"):
-                # Hier berechnen wir, wie viele Bytes dazukommen
                 data_parts = line[3:].split(",")
                 lines_to_process.append((current_address, line))
-                current_address += len(data_parts) # Jedes Komma-Element ist 1 Byte
+                current_address += len(data_parts)
             else:
                 lines_to_process.append((current_address, line))
-                current_address += 3 # Normale Befehle sind 3 Bytes
+                current_address += 3
 
     binary = b""
     for addr, line in lines_to_process:
         if line.startswith(".db"):
-            # Direkt Bytes schreiben
             data_parts = line[3:].split(",")
             for val_str in data_parts:
                 binary += bytes([int(val_str.strip(), 0)])
@@ -98,7 +95,12 @@ if __name__ == "__main__":
     if len(bytecode) > 512:
         print(f"Warnung: {input_file} ist mit {len(bytecode)} Bytes zu groß für einen Sektor!")
 
-    padded_bytecode = bytecode.ljust(512, b'\x00')
+    if len(bytecode) > 0:
+        target_size = ((len(bytecode) - 1) // 512 + 1) * 512
+    else:
+        target_size = 512
+
+    padded_bytecode = bytecode.ljust(target_size, b'\x00')
 
     try:
         with open("disk.bin", "r+b") as f:
