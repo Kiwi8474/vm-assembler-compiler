@@ -1,5 +1,4 @@
 *.asm
-*.c
 *.bin
 __pycache__
 .vscode
