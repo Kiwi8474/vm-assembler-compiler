@@ -26,6 +26,7 @@ private:
     std::vector<uint8_t> disk_content;
     std::deque<uint8_t> key_buffer;
     bool running = true;
+    bool vram_changed = false;
 
     SharedData* shared_memory = nullptr;
     HANDLE hMapFile = NULL;
@@ -215,11 +216,18 @@ public:
                 uint16_t addr = regs[reg_b];
                 uint16_t mode = regs[reg_c];
 
+                if (addr >= VRAM_START && addr <= VRAM_END) {
+                    vram_changed = true;
+                }
+
                 if (mode == 1) {
                     memory[addr] = val & 0xFF;
                 } else {
                     memory[addr] = (val >> 8) & 0xFF;
                     memory[addr + 1] = (val & 0xFF);
+                    if (addr + 1 >= VRAM_START && addr + 1 <= VRAM_END) {
+                        vram_changed = true;
+                    }
                 }
                 break;
             }
@@ -291,18 +299,19 @@ public:
             step();
             cycles_since_last_ips++;
 
-            if (cycles_since_last_ips % 10000 == 0) {
+            if (cycles_since_last_ips % 64 == 0) {
                 handleInput();
             }
 
-            if (cycles_since_last_ips % 5000 == 0) {
-                if (shared_memory) {
+            if (!(cycles_since_last_ips & 8191)) {
+                if (vram_changed && shared_memory) {
                     memcpy(shared_memory->vram, &memory[VRAM_START], 2000);
                     shared_memory->ips = current_ips;
+                    vram_changed = false;
                 }
             }
 
-            if (cycles_since_last_ips % 20000 == 0) {
+            if (!(cycles_since_last_ips & 1048576)) {
                 auto now = std::chrono::high_resolution_clock::now();
                 std::chrono::duration<double> elapsed = now - last_ips_time;
                 if (elapsed.count() >= 0.5) {

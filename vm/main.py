@@ -55,12 +55,15 @@ def movi(reg_a, imm):
 
 def add(reg_a, reg_b, reg_c):
     regs[reg_a] += regs[reg_b]
+    regs[reg_a] &= 0xFFFF
 
 def sub(reg_a, reg_b, reg_c):
     regs[reg_a] -= regs[reg_b]
+    regs[reg_a] &= 0xFFFF
 
 def mul(reg_a, reg_b, reg_c):
     regs[reg_a] *= regs[reg_b]
+    regs[reg_a] &= 0xFFFF
 
 def div(reg_a, reg_b, reg_c):
     if regs[reg_b] != 0:
