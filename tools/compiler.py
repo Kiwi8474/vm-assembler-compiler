@@ -4,6 +4,18 @@ import sys
 import re
 from assembler import assemble
 
+class CompilerError(Exception):
+    def __init__(self, message, line=None, token=None):
+        self.message = message
+        self.line = line
+        self.token = token
+        super().__init__(self.message)
+
+    def __str__(self):
+        prefix = f"[Error in line {self.line}] " if self.line else "[Compiler Error] "
+        token_info = f" (at '{self.token}')" if self.token else ""
+        return f"\n{prefix}{self.message}{token_info}"
+
 class NumberNode:
     def __init__(self, value, size=16):
         self.value = int(value, 0) if isinstance(value, str) else value
@@ -70,6 +82,19 @@ class StringNode:
         self.value = value.strip('"')
     def __repr__(self): return f"String({self.value})"
 
+class FunctionDefNode:
+    def __init__(self, name, block):
+        self.name = name
+        self.block = block
+
+class CallNode:
+    def __init__(self, name):
+        self.name = name
+
+class ReturnNode:
+    def __init__(self):
+        pass
+
 TOKEN_SPEC = [
     ('TYPE',       r'uint8\b|uint16\b'),
     ('DIRECTIVE', r'#[A-Za-z_]+'),
@@ -89,6 +114,8 @@ TOKEN_SPEC = [
     ('OUT', r'out\b'),
     ('LOAD', r'load\b'),
     ('SAVE', r'save\b'),
+    ('FN',      r'void\b'),
+    ('RETURN',  r'return\b'),
     ('CHAR', r"'.'"),
     ('STRING',     r'"[^"]*"'),
     ('LABEL',     r'[A-Za-z_][A-Za-z0-9_]*:'),
@@ -113,6 +140,18 @@ def preprocess_includes(code, base_path="."):
 
     return re.sub(include_pattern, replace_match, code)
 
+def apply_defines(code):
+    defines = {}
+    found = re.findall(r'#define\s+([A-Za-z_][A-Za-z0-9_]*)\s+([^\s\n]+)', code)
+    for name, value in found:
+        defines[name] = value
+
+    code = re.sub(r'#define\s+.*', '', code)
+
+    for name, value in defines.items():
+        code = re.sub(r'\b' + name + r'\b', value, code)
+    return code
+
 def strip_comments(code):
     code = re.sub(r'/\*.*?\*/', '', code, flags=re.DOTALL)
     code = re.sub(r'//.*', '', code)
@@ -120,11 +159,33 @@ def strip_comments(code):
 
 def tokenize(code):
     tokens = []
+    line_num = 1
+    last_pos = 0
+
     tok_regex = '|'.join('(?P<%s>%s)' % pair for pair in TOKEN_SPEC)
     for mo in re.finditer(tok_regex, code):
         kind = mo.lastgroup
-        if kind == 'WHITESPACE': continue
-        tokens.append((kind, mo.group()))
+        value = mo.group()
+        start_pos = mo.start()
+
+        if start_pos > last_pos:
+            skipped = code[last_pos:start_pos]
+            if skipped.strip():
+                bad_char = skipped.strip()[0]
+                raise CompilerError(f"Illegal character: '{bad_char}'", line=line_num)
+
+        if kind == 'WHITESPACE':
+            line_num += value.count('\n')
+        else:
+            tokens.append((kind, value, line_num))
+        
+        last_pos = mo.end()
+
+    if last_pos < len(code):
+        remaining = code[last_pos:].strip()
+        if remaining:
+            raise CompilerError(f"Illegal character at end: '{remaining[0]}'", line=line_num)
+
     return tokens
 
 class RegisterManager:
@@ -150,7 +211,7 @@ class RegisterManager:
                 if value is not None:
                     self.cache[reg] = value
                 return reg
-        raise Exception("Out of registers.")
+        raise CompilerError("Out of registers.")
 
     def free(self, reg):
         if reg in self.usage_map:
@@ -161,40 +222,56 @@ class Parser:
         self.tokens = tokens
         self.pos = 0
 
+    def error(self, message):
+        token = self.peek_token()
+        if token:
+            raise CompilerError(message, line=token[2], token=token[1])
+        last_line = self.tokens[-1][2] if self.tokens else None
+        raise CompilerError(message, line=last_line)
+
     def peek_token(self):
         return self.tokens[self.pos] if self.pos < len(self.tokens) else None
 
     def eat(self, expected_type=None):
         token = self.peek_token()
-        if not token: raise Exception("Unerwartetes Ende!")
+        if not token: self.error("Unexpected ending. Perhaps a bracket is missing.")
         if expected_type and token[0] != expected_type:
-            raise Exception(f"Erwartete {expected_type}, bekam {token[0]}, bei Quellcode {token[1]}")
+            self.error(f"Expected {expected_type}, got {token[0]}.")
         self.pos += 1
         return token
 
     def parse_factor(self, size=16):
-        token = self.peek_token()
-        if not token: return None
+        current_size = size
+        t = self.peek_token()
+        if not t: return None
 
-        current_size = 16
-        if token[0] == 'TYPE':
+        if t[0] == 'TYPE':
             type_str = self.eat('TYPE')[1]
             current_size = 8 if type_str == 'uint8' else 16
-            token = self.peek_token()
+            t = self.peek_token()
 
-        if token[0] == 'CHAR':
+        if t[0] == 'LPAREN':
+            self.eat('LPAREN')
+            node = self.parse_expression()
+            self.eat('RPAREN')
+            return node
+
+        if t[0] == 'CHAR':
             val = ord(self.eat('CHAR')[1][1])
             return NumberNode(val, size=8)
-        elif token[0] == 'DEREF':
+        elif t[0] == 'DEREF':
             self.eat('DEREF')
             addr = self.parse_factor() 
             return DerefNode(addr, size=current_size)
-        elif token[0] == 'NUMBER':
-            return NumberNode(self.eat('NUMBER')[1], size=current_size)
-        elif token[0] == 'NAME':
+        elif t[0] == 'NUMBER':
+            val_str = self.eat('NUMBER')[1]
+            return NumberNode(val_str, size=current_size)
+        elif t[0] == 'NAME':
             return self.eat('NAME')[1] 
 
-        raise Exception(f"Unerwartetes Token im Factor: {token}")
+        self.error(f"Unexpected '{t[1]}'")
+
+        self.error(f"Unexpected '{token[1]}'")
 
     def parse_expression(self):
         node = self.parse_factor()
@@ -206,6 +283,40 @@ class Parser:
     def parse_statement(self):
         t = self.peek_token()
         if t is None: return None
+
+        if t[0] == 'FN':
+            fn_token = self.eat('FN')
+            start_line = fn_token[2]
+            name = self.eat('NAME')[1]
+            self.eat('RPAREN')
+            self.eat('LBRACE')
+
+            block = []
+            while self.peek_token() and self.peek_token()[0] != 'RBRACE':
+                block.append(self.parse_statement())
+            
+            if not self.peek_token() or self.peek_token()[0] != 'RBRACE':
+                raise CompilerError(f"Unclosed function '{name}'. Started in line {start_line}", line=start_line)
+
+            self.eat('RBRACE')
+            if not block or not isinstance(block[-1], ReturnNode):
+                self.error(f"Missing return at function '{name}'.")
+
+            return FunctionDefNode(name, block)
+
+        if t[0] == 'RETURN':
+            self.eat('RETURN')
+            self.eat('SEMICOLON')
+            return ReturnNode()
+
+        if t[0] == 'NAME':
+            next_t = self.tokens[self.pos + 1] if self.pos + 1 < len(self.tokens) else None
+            if next_t and next_t[0] == 'LPAREN':
+                name = self.eat('NAME')[1]
+                self.eat('LPAREN')
+                self.eat('RPAREN')
+                self.eat('SEMICOLON')
+                return CallNode(name)
 
         if t[0] == 'LABEL': 
             return LabelNode(self.eat('LABEL')[1])
@@ -242,7 +353,7 @@ class Parser:
             self.eat('SEMICOLON')
             return LoadNode(sector, address) if stmt_type == 'LOAD' else SaveNode(sector, address)
         
-        raise Exception(f"Syntax Fehler bei {t}")
+        self.error(f"Syntax error at {t}")
 
     def parse_assignment(self, size):
         target = self.parse_factor() 
@@ -265,14 +376,21 @@ class Parser:
         return DirectiveNode(name, val)
 
     def parse_if(self):
-        self.eat('IF')
+        if_token = self.eat('IF')
+        start_line = if_token[2]
+        
         left = self.parse_expression()
         op = self.eat()[1]
         right = self.parse_expression()
+        
         self.eat('LBRACE')
         block = []
         while self.peek_token() and self.peek_token()[0] != 'RBRACE':
             block.append(self.parse_statement())
+
+        if not self.peek_token() or self.peek_token()[0] != 'RBRACE':
+            raise CompilerError(f"Unclosed 'if' block. Started in line {start_line}", line=start_line)
+            
         self.eat('RBRACE')
         return IfNode(left, op, right, block)
 
@@ -282,9 +400,10 @@ class Parser:
         return stmts
 
 if_label_count = 0
+call_label_count = 0
 
 def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None):
-    global if_label_count
+    global if_label_count, call_label_count
     if rm is None: rm = RegisterManager()
     if strings_to_embed is None: strings_to_embed = []
     asm = []
@@ -298,7 +417,25 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None)
         if not found_org: asm.append(".org 0x0400")
 
     for stmt in statements:
-        if isinstance(stmt, LabelNode):
+        if isinstance(stmt, FunctionDefNode):
+            asm.append(f"{stmt.name}:")
+            asm.append(generate_asm(stmt.block, is_sub_block=True, rm=rm, strings_to_embed=strings_to_embed))
+
+        elif isinstance(stmt, ReturnNode):
+            asm.append("pop r15")
+
+        elif isinstance(stmt, CallNode):
+            call_label_count += 1
+            ret_label = f"_ret_{call_label_count}_{stmt.name}"
+            
+            reg = rm.allocate() 
+            asm.append(f"movi {reg}, {ret_label}")
+            asm.append(f"push {reg}")
+            rm.free(reg)
+            asm.append(f"movi r15, {stmt.name}")
+            asm.append(f"{ret_label}:")
+
+        elif isinstance(stmt, LabelNode):
             asm.append(f"{stmt.name}:")
 
         elif isinstance(stmt, DirectiveNode):
@@ -458,19 +595,6 @@ def generate_expression_asm(node, rm):
 
     return "", None
 
-def compile(input_file):
-    with open(input_file, "r") as f:
-        code = f.read()
-
-    tokens = tokenize(code)
-
-    parser = Parser(tokens)
-    statements = parser.parse_program()
-
-    asm_output = generate_asm(statements)
-    
-    return asm_output
-
 if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("Usage: python compiler.py <source.c> <sector>")
@@ -479,46 +603,54 @@ if __name__ == "__main__":
     input_file = sys.argv[1]
     target_sector = int(sys.argv[2])
 
-    with open(input_file, "r") as f:
-        raw_code = f.read()
-
-    clean_code = strip_comments(raw_code)
-    source_code = preprocess_includes(clean_code, os.path.dirname(input_file))
-
-    tokens = tokenize(source_code)
-    parser = Parser(tokens)
-    statements = parser.parse_program()
-
-    max_sectors = 0
-    for s in statements:
-        if isinstance(s, DirectiveNode) and s.name == "#sectors":
-            max_sectors = s.value
-            break
-
-    asm_code = generate_asm(statements)
-
-    asm_file_name = f"temp_{datetime.datetime.now().strftime('%H%M%S')}.asm"
-    with open(asm_file_name, "w") as f:
-        f.write(asm_code)
-
-    bytecode = assemble(asm_file_name)
-    os.remove(asm_file_name)
-
-    actual_size = len(bytecode)
-    min_needed_sectors = ((actual_size - 1) // 512 + 1) if actual_size > 0 else 1
-
-    final_sector_count = max(min_needed_sectors, max_sectors)
-
-    if max_sectors > 0 and min_needed_sectors > max_sectors:
-        print(f"Warnung: {input_file} braucht {min_needed_sectors} Sektoren, aber #sectors ist nur {max_sectors}!")
-
-    target_size = final_sector_count * 512
-    padded_bytecode = bytecode.ljust(target_size, b'\x00')
-
     try:
+        with open(input_file, "r") as f:
+            raw_code = f.read()
+
+        clean_code = strip_comments(raw_code)
+        source_code = preprocess_includes(apply_defines(clean_code), os.path.dirname(input_file))
+
+        tokens = tokenize(source_code)
+        parser = Parser(tokens)
+        statements = parser.parse_program()
+
+        max_sectors = 0
+        for s in statements:
+            if isinstance(s, DirectiveNode) and s.name == "#sectors":
+                max_sectors = s.value
+                break
+
+        asm_code = generate_asm(statements)
+
+        asm_file_name = f"temp_{datetime.datetime.now().strftime('%H%M%S')}.asm"
+        with open(asm_file_name, "w") as f:
+            f.write(asm_code)
+
+        bytecode = assemble(asm_file_name)
+        os.remove(asm_file_name)
+
+        actual_size = len(bytecode)
+        min_needed_sectors = ((actual_size - 1) // 512 + 1) if actual_size > 0 else 1
+
+        final_sector_count = max(min_needed_sectors, max_sectors)
+
+        if max_sectors > 0 and min_needed_sectors > max_sectors:
+            print(f"[Warning] {input_file} needs {min_needed_sectors} sectors, but #sectors is only {max_sectors}.")
+
+        target_size = final_sector_count * 512
+        padded_bytecode = bytecode.ljust(target_size, b'\x00')
+
         with open("disk.bin", "r+b") as f:
             f.seek(target_sector * 512)
             f.write(padded_bytecode)
-        print(f"Erfolg! {input_file} ({actual_size} Bytes) wurde in {final_sector_count} Sektoren geschrieben.")
+        print(f"[Success] Wrote {actual_size} Bytes to {input_file} in {final_sector_count} Sectors.")
+
+    except CompilerError as e:
+        print(e)
+        sys.exit(1)
     except FileNotFoundError:
-        print("Fehler: disk.bin existiert nicht.")
+        print("[Error] disk.bin is missing.")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n[Unknown Error] {e}")
+        sys.exit(1)

@@ -107,10 +107,10 @@ public:
             disk_content.resize(size);
 
             if (file.read((char*)disk_content.data(), size)) {
-                std::cout << "Disk geladen: " << size << " Bytes." << std::endl;
+                std::cout << "Disk loaded: " << size << " Bytes." << std::endl;
             }
         } else {
-            std::cerr << "FEHLER: Konnte " << DISK << " nicht finden." << std::endl;
+            std::cerr << "Couldn't find" << DISK << "." << std::endl;
             disk_content.resize(1440 * 1024, 0);
         }
 
@@ -342,6 +342,11 @@ public:
                 
                 if (elapsed.count() >= 0.5) {
                     current_ips = cycles_since_last_ips / elapsed.count();
+
+                    if (shared_memory) {
+                        shared_memory->ips = current_ips;
+                    }
+
                     cycles_since_last_ips = 0;
                     last_ips_time = now;
                 }
@@ -355,20 +360,6 @@ public:
             std::cout << "r" << i << ": " << regs[i] << std::endl;
         }
         std::cout << "0xFFFF: " << (int)memory[65535];
-    }
-
-    void dumpVRAMtoFile() {
-        std::ofstream file("vram.bin", std::ios::binary | std::ios::trunc);
-        if (file.is_open()) {
-            file.write(reinterpret_cast<const char*>(memory.data() + VRAM_START), 2000);
-            file.close();
-
-            if (memory[VRAM_START] != 0) {
-                // std::cout << "VRAM Dump: Erstes Zeichen ist: " << (int)memory[VRAM_START] << std::endl;
-            }
-        } else {
-            std::cerr << "WARNUNG: vram.bin blockiert!" << std::endl;
-        }
     }
 };
 

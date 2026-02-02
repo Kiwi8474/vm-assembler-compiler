@@ -1,5 +1,7 @@
 #org 0x200
 #sectors 1
 
-load 1, 0x400;
-goto 0x400;
+#define userspace
+
+load 1, userspace;
+goto userspace;
