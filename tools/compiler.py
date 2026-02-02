@@ -127,6 +127,31 @@ def tokenize(code):
         tokens.append((kind, mo.group()))
     return tokens
 
+class RegisterManager:
+    def __init__(self):
+        self.available_regs = [f"r{i}" for i in range(14)]
+        self.cache = {}
+        self.usage_map = {reg: False for reg in self.available_regs}
+
+    def get_reg_with_value(self, value):
+        for reg, val in self.cache.items():
+            if val == value:
+                return reg
+        return None
+
+    def allocate(self, value=None):
+        for reg in self.available_regs:
+            if not self.usage_map[reg]:
+                self.usage_map[reg] = True
+                if value is not None:
+                    self.cache[reg] = value
+                return reg
+        raise Exception("Out of registers.")
+
+    def free(self, reg):
+        if reg in self.usage_map:
+            self.usage_map[reg] = False
+
 class Parser:
     def __init__(self, tokens):
         self.tokens = tokens
@@ -254,10 +279,11 @@ class Parser:
 
 if_label_count = 0
 
-def generate_asm(statements, is_sub_block=False):
+def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None):
     global if_label_count
+    if rm is None: rm = RegisterManager()
+    if strings_to_embed is None: strings_to_embed = []
     asm = []
-    strings_to_embed = []
 
     if not is_sub_block:
         found_org = False
@@ -270,72 +296,106 @@ def generate_asm(statements, is_sub_block=False):
     for stmt in statements:
         if isinstance(stmt, LabelNode):
             asm.append(f"{stmt.name}:")
+
         elif isinstance(stmt, DirectiveNode):
             if stmt.name == "#sectors":
                 continue
+
         elif isinstance(stmt, AssignNode):
             if isinstance(stmt.value, StringNode):
                 str_label = f"str_const_{len(strings_to_embed)}"
                 strings_to_embed.append((str_label, stmt.value.value))
-                asm.append(f"movi r0, {str_label}")
+                val_reg = rm.allocate() 
+                asm.append(f"movi {val_reg}, {str_label}")
             else:
-                asm.append(generate_expression_asm(stmt.value))
-            
-            asm.append("mov r10, r0")
+                v_asm, val_reg = generate_expression_asm(stmt.value, rm)
+                if v_asm: asm.append(v_asm)
 
             if isinstance(stmt.target, NumberNode):
-                asm.append(f"movi r1, {hex(stmt.target.value)}")
+                target_reg = rm.get_reg_with_value(stmt.target.value)
+                if not target_reg:
+                    target_reg = rm.allocate(stmt.target.value)
+                    asm.append(f"movi {target_reg}, {hex(stmt.target.value)}")
+            
             elif isinstance(stmt.target, DerefNode):
-                asm.append(f"movi r1, {hex(stmt.target.target.value)}")
-                asm.append("movi r2, 0")
-                asm.append("peek r0, r1, r2")
-                asm.append("mov r1, r0")
+                addr_asm, addr_ptr_reg = generate_expression_asm(stmt.target.target, rm)
+                if addr_asm: asm.append(addr_asm)
+                
+                target_reg = rm.allocate()
+                m0_reg = rm.get_reg_with_value(0)
+                if not m0_reg:
+                    m0_reg = rm.allocate(0)
+                    asm.append(f"movi {m0_reg}, 0")
+                
+                asm.append(f"peek {target_reg}, {addr_ptr_reg}, {m0_reg}")
+                rm.free(addr_ptr_reg)
 
             mode = 1 if stmt.size == 8 else 0
-            asm.append(f"movi r2, {mode}")
-            asm.append("mov r0, r10") 
-            asm.append("poke r0, r1, r2")
+            mode_reg = rm.get_reg_with_value(mode)
+            if not mode_reg:
+                mode_reg = rm.allocate(mode)
+                asm.append(f"movi {mode_reg}, {mode}")
+
+            asm.append(f"poke {val_reg}, {target_reg}, {mode_reg}")
+
+            rm.usage_map = {reg: False for reg in rm.available_regs}
 
         if isinstance(stmt, GotoNode):
             if isinstance(stmt.target, str):
                 asm.append(f"movi r15, {stmt.target}")
             else:
-                asm.append(generate_expression_asm(stmt.target))
-                asm.append("mov r15, r0")
+                target_asm, target_reg = generate_expression_asm(stmt.target, rm)
+                if target_asm: asm.append(target_asm)
+                asm.append(f"mov r15, {target_reg}")
+            rm.usage_map = {reg: False for reg in rm.available_regs}
+
         elif isinstance(stmt, OutNode):
-            asm.append(generate_expression_asm(stmt.port))
-            asm.append("push r0")
-            asm.append(generate_expression_asm(stmt.data))
-            asm.append("mov r6, r0")
-            asm.append("pop r5")
-            asm.append("out r5, r6")
+            p_asm, p_reg = generate_expression_asm(stmt.port, rm)
+            if p_asm: asm.append(p_asm)
+            
+            d_asm, d_reg = generate_expression_asm(stmt.data, rm)
+            if d_asm: asm.append(d_asm)
+            
+            asm.append(f"out {p_reg}, {d_reg}")
+            rm.usage_map = {reg: False for reg in rm.available_regs}
+
         elif isinstance(stmt, (LoadNode, SaveNode)):
-            asm.append(generate_expression_asm(stmt.sector))
-            asm.append("push r0")
-            asm.append(generate_expression_asm(stmt.address))
-            asm.append("mov r12, r0")
-            asm.append("pop r11")
-            asm.append("movi r13, 0")
+            s_asm, s_reg = generate_expression_asm(stmt.sector, rm)
+            if s_asm: asm.append(s_asm)
+            
+            a_asm, a_reg = generate_expression_asm(stmt.address, rm)
+            if a_asm: asm.append(a_asm)
+
+            m_reg = rm.get_reg_with_value(0)
+            if not m_reg:
+                m_reg = rm.allocate(0)
+                asm.append(f"movi {m_reg}, 0")
+                
             cmd = "load" if isinstance(stmt, LoadNode) else "save"
-            asm.append(f"{cmd} r11, r12, r13")
+            asm.append(f"{cmd} {s_reg}, {a_reg}, {m_reg}")
+            rm.usage_map = {reg: False for reg in rm.available_regs}
+
         elif isinstance(stmt, IfNode):
             if_label_count += 1
             label_end = f"_endif_{if_label_count}"
 
-            asm.append(generate_expression_asm(stmt.left))
-            asm.append("mov r5, r0")
-            asm.append(generate_expression_asm(stmt.right))
-            asm.append("mov r6, r0")
+            l_asm, l_reg = generate_expression_asm(stmt.left, rm)
+            if l_asm: asm.append(l_asm)
+            
+            r_asm, r_reg = generate_expression_asm(stmt.right, rm)
+            if r_asm: asm.append(r_asm)
 
-            asm.append(f"movi r4, {label_end}")
+            target_reg = rm.allocate()
+            asm.append(f"movi {target_reg}, {label_end}")
 
             if stmt.op == "==":
-                asm.append("jne r5, r6, r4")
+                asm.append(f"jne {l_reg}, {r_reg}, {target_reg}")
             else:
-                asm.append("je r5, r6, r4")
+                asm.append(f"je {l_reg}, {r_reg}, {target_reg}")
 
-            asm.append(generate_asm(stmt.block, is_sub_block=True))
+            asm.append(generate_asm(stmt.block, is_sub_block=True, rm=rm, strings_to_embed=strings_to_embed))
             asm.append(f"{label_end}:")
+            rm.usage_map = {reg: False for reg in rm.available_regs}
 
     if not is_sub_block:
         asm.append("movi r15, 0xFFFF")
@@ -349,23 +409,44 @@ def generate_asm(statements, is_sub_block=False):
         
     return "\n".join(asm)
 
-def generate_expression_asm(node):
+def generate_expression_asm(node, rm):
     if isinstance(node, NumberNode):
-        return f"movi r0, {hex(node.value)}"
+        val = hex(node.value)
+        existing_reg = rm.get_reg_with_value(node.value)
+        if existing_reg:
+            return "", existing_reg
+
+        reg = rm.allocate(node.value)
+        return f"movi {reg}, {val}", reg
     
     if isinstance(node, DerefNode):
         mode = 1 if node.size == 8 else 0
-        addr_asm = generate_expression_asm(node.target)
-        return f"{addr_asm}\nmov r1, r0\nmovi r2, {mode}\npeek r0, r1, r2"
+        addr_asm, addr_reg = generate_expression_asm(node.target, rm)
+
+        target_reg = rm.allocate()
+        mode_reg = rm.get_reg_with_value(mode)
+        mode_asm = ""
+        if not mode_reg:
+            mode_reg = rm.allocate(mode)
+            mode_asm = f"movi {mode_reg}, {mode}\n"
+        
+        asm = f"{addr_asm}\n{mode_asm}peek {target_reg}, {addr_reg}, {mode_reg}"
+        rm.free(addr_reg)
+        return asm, target_reg
 
     if isinstance(node, BinOpNode):
-        left_asm = generate_expression_asm(node.left)
-        right_asm = generate_expression_asm(node.right)
+        left_asm, left_reg = generate_expression_asm(node.left, rm)
+        right_asm, right_reg = generate_expression_asm(node.right, rm)
 
-        return f"{left_asm}\npush r0\n{right_asm}\nmov r2, r0\npop r3\nmov r0, r3\n" + \
-               ("add r0, r2" if node.op == '+' else "sub r0, r2" if node.op == '-' else "mul r0, r2" if node.op == '*' else "div r0, r2")
+        op_cmd = {"+": "add", "-": "sub", "*": "mul", "/": "div"}[node.op]
+        asm = f"{left_asm}\n{right_asm}\n{op_cmd} {left_reg}, {right_reg}"
 
-    return ""
+        rm.free(right_reg)
+        if left_reg in rm.cache: del rm.cache[left_reg]
+
+        return asm, left_reg
+
+    return "", None
 
 def compile(input_file):
     with open(input_file, "r") as f:
@@ -411,7 +492,7 @@ if __name__ == "__main__":
         f.write(asm_code)
 
     bytecode = assemble(asm_file_name)
-    os.remove(asm_file_name)
+    #os.remove(asm_file_name)
 
     actual_size = len(bytecode)
     min_needed_sectors = ((actual_size - 1) // 512 + 1) if actual_size > 0 else 1
