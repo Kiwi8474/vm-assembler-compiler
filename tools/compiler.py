@@ -143,6 +143,10 @@ class RegisterManager:
         for reg in self.available_regs:
             if not self.usage_map[reg]:
                 self.usage_map[reg] = True
+
+                if reg in self.cache:
+                    del self.cache[reg]
+                
                 if value is not None:
                     self.cache[reg] = value
                 return reg
@@ -298,8 +302,7 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None)
             asm.append(f"{stmt.name}:")
 
         elif isinstance(stmt, DirectiveNode):
-            if stmt.name == "#sectors":
-                continue
+            continue
 
         elif isinstance(stmt, AssignNode):
             if isinstance(stmt.value, StringNode):
@@ -310,6 +313,8 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None)
             else:
                 v_asm, val_reg = generate_expression_asm(stmt.value, rm)
                 if v_asm: asm.append(v_asm)
+
+            rm.usage_map[val_reg] = True
 
             if isinstance(stmt.target, NumberNode):
                 target_reg = rm.get_reg_with_value(stmt.target.value)
@@ -330,6 +335,7 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None)
                 asm.append(f"peek {target_reg}, {addr_ptr_reg}, {m0_reg}")
                 rm.free(addr_ptr_reg)
 
+            rm.usage_map[target_reg] = True
             mode = 1 if stmt.size == 8 else 0
             mode_reg = rm.get_reg_with_value(mode)
             if not mode_reg:
@@ -337,10 +343,9 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None)
                 asm.append(f"movi {mode_reg}, {mode}")
 
             asm.append(f"poke {val_reg}, {target_reg}, {mode_reg}")
-
             rm.usage_map = {reg: False for reg in rm.available_regs}
 
-        if isinstance(stmt, GotoNode):
+        elif isinstance(stmt, GotoNode):
             if isinstance(stmt.target, str):
                 asm.append(f"movi r15, {stmt.target}")
             else:
@@ -352,6 +357,8 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None)
         elif isinstance(stmt, OutNode):
             p_asm, p_reg = generate_expression_asm(stmt.port, rm)
             if p_asm: asm.append(p_asm)
+
+            rm.usage_map[p_reg] = True
             
             d_asm, d_reg = generate_expression_asm(stmt.data, rm)
             if d_asm: asm.append(d_asm)
@@ -362,9 +369,11 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None)
         elif isinstance(stmt, (LoadNode, SaveNode)):
             s_asm, s_reg = generate_expression_asm(stmt.sector, rm)
             if s_asm: asm.append(s_asm)
-            
+            rm.usage_map[s_reg] = True
+
             a_asm, a_reg = generate_expression_asm(stmt.address, rm)
             if a_asm: asm.append(a_asm)
+            rm.usage_map[a_reg] = True
 
             m_reg = rm.get_reg_with_value(0)
             if not m_reg:
@@ -381,9 +390,11 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None)
 
             l_asm, l_reg = generate_expression_asm(stmt.left, rm)
             if l_asm: asm.append(l_asm)
-            
+            rm.usage_map[l_reg] = True
+
             r_asm, r_reg = generate_expression_asm(stmt.right, rm)
             if r_asm: asm.append(r_asm)
+            rm.usage_map[r_reg] = True
 
             target_reg = rm.allocate()
             asm.append(f"movi {target_reg}, {label_end}")
@@ -399,7 +410,6 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None)
 
     if not is_sub_block:
         asm.append("movi r15, 0xFFFF")
-
         if strings_to_embed:
             asm.append("\n; --- String Data Section ---")
             for label, text in strings_to_embed:
