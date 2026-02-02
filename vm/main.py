@@ -6,6 +6,7 @@ import time
 
 DISK = "disk.bin"
 BIOS = bytes([
+    0x2E, 0xAF, 0xFF,
     0x20, 0x00, 0x00,
     0x21, 0x02, 0x00,
     0xC0, 0x10, 0x00,
@@ -126,7 +127,7 @@ def load(reg_a, reg_b, reg_c):
 
 def save(reg_a, reg_b, reg_c):
     start_addr = regs[reg_b]
-    disk_start = reg_a * 512
+    disk_start = regs[reg_a] * 512
 
     if start_addr + 512 <= 65536:
         disk_content[disk_start : disk_start + 512] = memory[start_addr : start_addr + 512]
