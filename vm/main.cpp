@@ -107,8 +107,6 @@ public:
     }
 
     void step() {
-        handleInput();
-
         uint16_t pc_val = regs[15];
         uint8_t b1 = memory[pc_val];
         uint8_t b2 = memory[pc_val + 1];
@@ -295,15 +293,15 @@ public:
         long cycles_since_last_ips = 0;
         double current_ips = 0;
 
+        int timing_counter = 1000000; 
+
         while (running) {
             step();
             cycles_since_last_ips++;
-
-            if (cycles_since_last_ips % 64 == 0) {
-                handleInput();
-            }
+            timing_counter--;
 
             if (!(cycles_since_last_ips & 8191)) {
+                handleInput();
                 if (vram_changed && shared_memory) {
                     memcpy(shared_memory->vram, &memory[VRAM_START], 2000);
                     shared_memory->ips = current_ips;
@@ -311,15 +309,16 @@ public:
                 }
             }
 
-            if (!(cycles_since_last_ips & 1048576)) {
+            if (timing_counter <= 0) {
                 auto now = std::chrono::high_resolution_clock::now();
                 std::chrono::duration<double> elapsed = now - last_ips_time;
+                
                 if (elapsed.count() >= 0.5) {
                     current_ips = cycles_since_last_ips / elapsed.count();
                     cycles_since_last_ips = 0;
                     last_ips_time = now;
-                    Sleep(1); 
                 }
+                timing_counter = 1000000;
             }
         }
     }
