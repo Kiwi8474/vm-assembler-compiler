@@ -95,7 +95,13 @@ class ReturnNode:
     def __init__(self):
         pass
 
+class InlineAsmNode:
+    def __init__(self, content):
+        self.content = content
+    def __repr__(self): return f"InlineAsm({self.content[:20]}...)"
+
 TOKEN_SPEC = [
+    ('ASM',       r'asm\b'),
     ('TYPE',       r'uint8\b|uint16\b'),
     ('DIRECTIVE', r'#[A-Za-z_]+'),
     ('NUMBER',    r'(0x[0-9A-Fa-f]+|\d+)'),
@@ -284,10 +290,24 @@ class Parser:
         t = self.peek_token()
         if t is None: return None
 
+        if t[0] == 'ASM':
+            self.eat('ASM')
+            self.eat('LBRACE')
+            asm_content = ""
+            while self.peek_token() and self.peek_token()[0] != 'RBRACE':
+                token_type, token_value, _ = self.eat()
+                if token_type == 'SEMICOLON':
+                    asm_content += "\n"
+                else:
+                    asm_content += token_value + " "
+            self.eat('RBRACE')
+            return InlineAsmNode(asm_content)
+
         if t[0] == 'FN':
             fn_token = self.eat('FN')
             start_line = fn_token[2]
             name = self.eat('NAME')[1]
+            self.eat('LPAREN')
             self.eat('RPAREN')
             self.eat('LBRACE')
 
@@ -407,6 +427,7 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None)
     if rm is None: rm = RegisterManager()
     if strings_to_embed is None: strings_to_embed = []
     asm = []
+    functions_asm = []
 
     if not is_sub_block:
         found_org = False
@@ -418,8 +439,11 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None)
 
     for stmt in statements:
         if isinstance(stmt, FunctionDefNode):
-            asm.append(f"{stmt.name}:")
-            asm.append(generate_asm(stmt.block, is_sub_block=True, rm=rm, strings_to_embed=strings_to_embed))
+            f_asm = []
+            f_asm.append(f"{stmt.name}:")
+            f_asm.append(generate_asm(stmt.block, is_sub_block=True, rm=rm, strings_to_embed=strings_to_embed))
+            functions_asm.append("\n".join(f_asm))
+            rm.cache.clear()
 
         elif isinstance(stmt, ReturnNode):
             asm.append("pop r15")
@@ -427,7 +451,6 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None)
         elif isinstance(stmt, CallNode):
             call_label_count += 1
             ret_label = f"_ret_{call_label_count}_{stmt.name}"
-            
             reg = rm.allocate() 
             asm.append(f"movi {reg}, {ret_label}")
             asm.append(f"push {reg}")
@@ -440,6 +463,14 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None)
 
         elif isinstance(stmt, DirectiveNode):
             continue
+
+        elif isinstance(stmt, InlineAsmNode):
+            asm.append("; --- Inline Assembly ---")
+            formatted_asm = stmt.content.replace(' ; ', '\n').replace(';', '\n')
+            asm.append(formatted_asm)
+            asm.append("; -----------------------")
+            rm.usage_map = {reg: False for reg in rm.available_regs}
+            rm.cache.clear()
 
         elif isinstance(stmt, AssignNode):
             if isinstance(stmt.value, StringNode):
@@ -481,6 +512,7 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None)
 
             asm.append(f"poke {val_reg}, {target_reg}, {mode_reg}")
             rm.usage_map = {reg: False for reg in rm.available_regs}
+            rm.cache.clear()
 
         elif isinstance(stmt, GotoNode):
             if isinstance(stmt.target, str):
@@ -490,6 +522,7 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None)
                 if target_asm: asm.append(target_asm)
                 asm.append(f"mov r15, {target_reg}")
             rm.usage_map = {reg: False for reg in rm.available_regs}
+            rm.cache.clear()
 
         elif isinstance(stmt, OutNode):
             p_asm, p_reg = generate_expression_asm(stmt.port, rm)
@@ -502,6 +535,7 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None)
             
             asm.append(f"out {p_reg}, {d_reg}")
             rm.usage_map = {reg: False for reg in rm.available_regs}
+            rm.cache.clear()
 
         elif isinstance(stmt, (LoadNode, SaveNode)):
             s_asm, s_reg = generate_expression_asm(stmt.sector, rm)
@@ -520,6 +554,7 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None)
             cmd = "load" if isinstance(stmt, LoadNode) else "save"
             asm.append(f"{cmd} {s_reg}, {a_reg}, {m_reg}")
             rm.usage_map = {reg: False for reg in rm.available_regs}
+            rm.cache.clear()
 
         elif isinstance(stmt, IfNode):
             if_label_count += 1
@@ -544,9 +579,16 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None)
             asm.append(generate_asm(stmt.block, is_sub_block=True, rm=rm, strings_to_embed=strings_to_embed))
             asm.append(f"{label_end}:")
             rm.usage_map = {reg: False for reg in rm.available_regs}
+            rm.cache.clear()
 
     if not is_sub_block:
+        asm.append("\n; --- End of Main Program ---")
         asm.append("movi r15, 0xFFFF")
+
+        if functions_asm:
+            asm.append("\n; --- Functions Section ---")
+            asm.extend(functions_asm)
+
         if strings_to_embed:
             asm.append("\n; --- String Data Section ---")
             for label, text in strings_to_embed:

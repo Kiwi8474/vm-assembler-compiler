@@ -117,7 +117,7 @@ public:
         if (disk_content.size() >= 512) {
             std::copy(disk_content.begin(), disk_content.begin() + 512, memory.begin() + 0x200);
             regs[15] = 0x200; 
-            regs[14] = 0xFFFF;
+            regs[14] = 0xAFFF;
         }
     }
 
@@ -297,6 +297,9 @@ public:
                 uint8_t low_byte = memory[regs[14] + 1];
                 regs[reg_a] = (high_byte << 8) | low_byte;
                 regs[14] += 2;
+                if (reg_a == 15) {
+                    jumped = true;
+                }
                 break;
             }
 
