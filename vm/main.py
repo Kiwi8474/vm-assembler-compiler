@@ -28,8 +28,11 @@ key_buffer = []
 # 0x8000 - 0x87CF : VRAM (2000 Bytes)                - Grafikspeicher
 # 0x87D0 - 0xABFF : Low-RAM (9264 Bytes / ~9.05 KiB)
 # 0xAC00 - 0xAFFF : Stack (1 KiB)                    - Platz für 512 Words
-# 0xB000 - 0xFFFE : High-RAM (20478 Bytes / ~20 KiB)
-# 0xFFFF          : MMIO Port (1 Byte)               - Tastaturport
+# 0xB000 - 0xFFFB : High-RAM (20475 Bytes / ~20 KiB)
+# 0xFFFC          : Mausknopf MMIO Port (1 Byte)
+# 0xFFFD          : Maus-Y MMIO Port (1 Byte)
+# 0xFFFE          : Maus-X MMIO Port (1 Byte)
+# 0xFFFF          : Tastatur MMIO Port (1 Byte)
 # ===============================================================================
 
 with open(DISK, "rb") as f:

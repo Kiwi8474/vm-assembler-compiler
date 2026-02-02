@@ -1,15 +1,5 @@
 #org 0x200
 #sectors 1
 
-uint8 0x8000 = 'H';
-uint8 0x8001 = 'a';
-uint8 0x8002 = 'l';
-uint8 0x8003 = 'l';
-uint8 0x8004 = 'o';
-uint8 0x8005 = '!';
-
-out 0x1, '!';
 load 1, 0x400;
-out 0x1, '?';
-out 0x1, 10;
 goto 0x400;

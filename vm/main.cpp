@@ -16,8 +16,29 @@ struct SharedData {
     uint8_t vram[2000];
     double ips;
     uint8_t key;
+    uint8_t mouse_x;
+    uint8_t mouse_y;
+    uint8_t mouse_btn;
 };
 #pragma pack(pop)
+
+/*
+===============================================================================
+Memory Map
+===============================================================================
+0x0000 - 0x01FF : BIOS (512 Bytes)                 - Hardkodiertes ROM-Programm
+0x0200 - 0x03FF : Boot Sektor (512 Bytes)          - Sektor 0 der Disk
+0x0400 - 0x7FFF : Freier RAM (31 KiB)              - Kernel & Programme
+0x8000 - 0x87CF : VRAM (2000 Bytes)                - Grafikspeicher
+0x87D0 - 0xABFF : Low-RAM (9264 Bytes / ~9.05 KiB)
+0xAC00 - 0xAFFF : Stack (1 KiB)                    - Platz für 512 Words
+0xB000 - 0xFFFB : High-RAM (20475 Bytes / ~20 KiB)
+0xFFFC          : Mausknopf MMIO Port (1 Byte)
+0xFFFD          : Maus-Y MMIO Port (1 Byte)
+0xFFFE          : Maus-X MMIO Port (1 Byte)
+0xFFFF          : Tastatur MMIO Port (1 Byte)
+===============================================================================
+*/
 
 class VM {
 private:
@@ -40,6 +61,12 @@ private:
         if (memory[0xFFFF] == 0 && !key_buffer.empty()) {
             memory[0xFFFF] = key_buffer.front();
             key_buffer.pop_front();
+        }
+
+        if (shared_memory) {
+            memory[0xFFFE] = shared_memory->mouse_x; 
+            memory[0xFFFD] = shared_memory->mouse_y;
+            memory[0xFFFC] = shared_memory->mouse_btn;
         }
     }
 
@@ -174,7 +201,7 @@ public:
                 if (port == 0x1) {
                     std::cout << (char)data << std::flush;
                 } else if (port == 0x2) {
-                    std::cout << (int)data << std::hex << (int)data << std::dec << std::flush;
+                    std::cout << (int)data << " / 0x" << std::hex << (int)data << std::dec << std::flush;
                 }
                 break;
             }

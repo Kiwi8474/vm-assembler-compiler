@@ -4,7 +4,7 @@ import mmap
 import struct
 import pygame
 
-SHM_SIZE = 2009
+SHM_SIZE = 2012
 SHM_NAME = "Local\\VM_SharedMemory"
 
 def start_monitor():
@@ -17,6 +17,13 @@ def start_monitor():
     
     running = True
     while running:
+        mx, my = pygame.mouse.get_pos()
+        mb = pygame.mouse.get_pressed()
+
+        m_grid_x = max(0, min(79, mx // 10))
+        m_grid_y = max(0, min(24, my // 16))
+        m_click = 1 if mb[0] else 0
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
@@ -43,6 +50,9 @@ def start_monitor():
 
             vram_data = all_data[:2000]
             ips_data = all_data[2000:2008]
+
+            shm.seek(2009)
+            shm.write(struct.pack('BBB', m_grid_x, m_grid_y, m_click))
 
             ips = struct.unpack('d', ips_data)[0]
 
