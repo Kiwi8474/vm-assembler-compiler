@@ -502,7 +502,7 @@ if __name__ == "__main__":
         f.write(asm_code)
 
     bytecode = assemble(asm_file_name)
-    #os.remove(asm_file_name)
+    os.remove(asm_file_name)
 
     actual_size = len(bytecode)
     min_needed_sectors = ((actual_size - 1) // 512 + 1) if actual_size > 0 else 1
