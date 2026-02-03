@@ -72,18 +72,22 @@ void strcmp() { // erwartet zwei string-adressen auf dem stack
         poke r0, r1, r2;
     }
 
-    #define char1 0x87E4
-    #define char2 0x87E5
+    strcmp_loop:
+    if uint8 $$$str_1 != uint8 $$$str_2 {
+        return 1;
+    }
 
-    uint16 char1 = uint16 $$str_1;
-    uint16 char2 = uint16 $$str_2;
+    if uint8 $$$str_1 == 0 {
+        return 0;
+    }
 
-    out 0x2, $str_1;
-    out 0x1, 10;
-    out 0x2, $str_2;
+    if uint8 $$$str_2 == 0 {
+        return 0;
+    }
 
-    strcmp_end:
-    return;
+    uint16 $str_1 = uint16 $$str_1 + 1;
+    uint16 $str_2 = uint16 $$str_2 + 1;
+    goto strcmp_loop;
 }
 
 void scroll() {

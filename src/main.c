@@ -1,5 +1,5 @@
 #org 0x400
-#sectors 2
+#sectors 3
 
 #include "stdio.c"
 
@@ -65,7 +65,22 @@ asm {
     movi r0, 0x87F2;
     push r0;
 }
-strcmp();
+
+if strcmp() == 0 {
+    uint16 0x87F0 = "\nStrings sind gleich!\n";
+    asm {
+        movi r0, 0x87F0;
+        push r0;
+    }
+    print();
+} else {
+    uint16 0x87F0 = "\nStrings sind nicht gleich!\n";
+    asm {
+        movi r0, 0x87F0;
+        push r0;
+    }
+    print();
+}
 
 mainloop:
 if uint8 $running == 1 {

@@ -93,8 +93,8 @@ class CallNode:
         self.name = name
 
 class ReturnNode:
-    def __init__(self):
-        pass
+    def __init__(self, value_node=None):
+        self.value = value_node
 
 class InlineAsmNode:
     def __init__(self, content):
@@ -293,8 +293,13 @@ class Parser:
         elif t[0] == 'NUMBER':
             val_str = self.eat('NUMBER')[1]
             return NumberNode(val_str, size=current_size)
-        elif t[0] == 'NAME':
-            return self.eat('NAME')[1] 
+        if t[0] == 'NAME':
+            name = self.eat('NAME')[1]
+            if self.peek_token() and self.peek_token()[0] == 'LPAREN':
+                self.eat('LPAREN')
+                self.eat('RPAREN')
+                return CallNode(name)
+            return name
 
         self.error(f"Unexpected '{t[1]}'")
 
@@ -340,15 +345,30 @@ class Parser:
                 raise CompilerError(f"Unclosed function '{name}'. Started in line {start_line}", line=start_line)
 
             self.eat('RBRACE')
-            if not block or not isinstance(block[-1], ReturnNode):
-                self.error(f"Missing return at function '{name}'.")
+
+            def check_for_return(stmts):
+                for s in stmts:
+                    if isinstance(s, ReturnNode):
+                        return True
+                    if isinstance(s, IfNode):
+                        if check_for_return(s.block):
+                            return True
+                        if s.else_block and check_for_return(s.else_block):
+                            return True
+                return False
+
+            if not check_for_return(block): self.error(f"Missing return at function '{name}'.")
 
             return FunctionDefNode(name, block)
 
         if t[0] == 'RETURN':
             self.eat('RETURN')
+            value_node = None
+            if self.peek_token() and self.peek_token()[0] != 'SEMICOLON':
+                value_node = self.parse_expression()
+            
             self.eat('SEMICOLON')
-            return ReturnNode()
+            return ReturnNode(value_node)
 
         if t[0] == 'NAME':
             next_t = self.tokens[self.pos + 1] if self.pos + 1 < len(self.tokens) else None
@@ -473,6 +493,18 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None)
             rm.cache.clear()
 
         elif isinstance(stmt, ReturnNode):
+            if stmt.value:
+                val_asm, val_reg = generate_expression_asm(stmt.value, rm)
+                if val_asm: asm.append(val_asm)
+
+                ra_reg = rm.allocate()
+                asm.append(f"pop {ra_reg}")
+                asm.append(f"push {val_reg}")
+                asm.append(f"push {ra_reg}")
+                
+                rm.free(ra_reg)
+                rm.free(val_reg)
+
             asm.append("pop r15")
 
         elif isinstance(stmt, CallNode):
@@ -656,6 +688,25 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None)
     return "\n".join(asm)
 
 def generate_expression_asm(node, rm):
+    global call_label_count
+
+    if isinstance(node, CallNode):
+        call_label_count += 1
+        ret_label = f"_ret_{call_label_count}_{node.name}"
+
+        reg_ret = rm.allocate()
+        asm = f"movi {reg_ret}, {ret_label}\n"
+        asm += f"push {reg_ret}\n"
+        rm.free(reg_ret)
+
+        asm += f"movi r15, {node.name}\n"
+        asm += f"{ret_label}:\n"
+
+        res_reg = rm.allocate()
+        asm += f"pop {res_reg}"
+        
+        return asm, res_reg
+
     if isinstance(node, NumberNode):
         val = hex(node.value)
         existing_reg = rm.get_reg_with_value(node.value)
