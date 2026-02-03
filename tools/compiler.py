@@ -56,11 +56,12 @@ class DirectiveNode:
         self.value = int(value, 0)
 
 class IfNode:
-    def __init__(self, left, op, right, block):
+    def __init__(self, left, op, right, block, else_block=None):
         self.left = left
         self.op = op
         self.right = right
         self.block = block
+        self.else_block = else_block
 
 class OutNode:
     def __init__(self, port, data):
@@ -106,11 +107,14 @@ TOKEN_SPEC = [
     ('DIRECTIVE', r'#[A-Za-z_]+'),
     ('NUMBER',    r'(0x[0-9A-Fa-f]+|\d+)'),
     ('IF',        r'if\b'),
+    ('ELSE',       r'else\b'),
     ('EQ',        r'=='),
     ('NE',        r'!='),
+    ('LT', r'<'),
+    ('GT', r'>'),
     ('ASSIGN',    r'='),
     ('DEREF',     r'\$'),
-    ('OP',        r'[+\-*/]'),
+    ('OP',        r'[+\-*/%]'),
     ('SEMICOLON', r';'),
     ('LBRACE',    r'\{'),
     ('RBRACE',    r'\}'),
@@ -130,21 +134,30 @@ TOKEN_SPEC = [
     ('WHITESPACE', r'\s+'),
 ]
 
-def preprocess_includes(code, base_path="."):
+def strip_comments(code):
+    code = re.sub(r'/\*.*?\*/', lambda m: '\n' * m.group().count('\n'), code, flags=re.DOTALL)
+    code = re.sub(r'//.*', '', code)
+    return code
+
+def get_combined_source(filepath):
+    if not os.path.exists(filepath):
+        print(f"[Warning] File {filepath} not found!")
+        return f"// Error: {filepath} not found"
+
+    with open(filepath, "r") as f:
+        code = f.read()
+
+    code = strip_comments(code)
+
     include_pattern = r'#include\s+"([^"]+)"'
     
     def replace_match(match):
         filename = match.group(1)
-        full_path = os.path.join(base_path, filename)
-        if os.path.exists(full_path):
-            with open(full_path, "r") as f:
-                included_code = f.read()
-            return preprocess_includes(included_code, os.path.dirname(full_path))
-        else:
-            print(f"Warnung: Include-Datei '{filename}' nicht gefunden!")
-            return f"// Fehler: {filename} nicht gefunden"
+        full_path = os.path.join(os.path.dirname(filepath), filename)
+        return get_combined_source(full_path)
 
-    return re.sub(include_pattern, replace_match, code)
+    code = re.sub(include_pattern, replace_match, code)
+    return code
 
 def apply_defines(code):
     defines = {}
@@ -154,14 +167,17 @@ def apply_defines(code):
 
     code = re.sub(r'#define\s+.*', '', code)
 
-    for name, value in defines.items():
+    for name in sorted(defines.keys(), key=len, reverse=True):
+        value = defines[name]
         code = re.sub(r'\b' + name + r'\b', value, code)
+    
     return code
 
-def strip_comments(code):
-    code = re.sub(r'/\*.*?\*/', '', code, flags=re.DOTALL)
-    code = re.sub(r'//.*', '', code)
-    return code
+def preprocess(main_file):
+    full_raw_code = get_combined_source(main_file)
+    final_source = apply_defines(full_raw_code)
+    
+    return final_source
 
 def tokenize(code):
     tokens = []
@@ -251,6 +267,11 @@ class Parser:
         t = self.peek_token()
         if not t: return None
 
+        if t[0] == 'STRING':
+            val = self.eat('STRING')[1]
+            val = val.strip('"').replace('\\n', '\n').replace('\\r', '\r').replace('\\t', '\t')
+            return StringNode(val)
+
         if t[0] == 'TYPE':
             type_str = self.eat('TYPE')[1]
             current_size = 8 if type_str == 'uint8' else 16
@@ -267,7 +288,7 @@ class Parser:
             return NumberNode(val, size=8)
         elif t[0] == 'DEREF':
             self.eat('DEREF')
-            addr = self.parse_factor() 
+            addr = self.parse_factor(size=16)
             return DerefNode(addr, size=current_size)
         elif t[0] == 'NUMBER':
             val_str = self.eat('NUMBER')[1]
@@ -407,12 +428,18 @@ class Parser:
         block = []
         while self.peek_token() and self.peek_token()[0] != 'RBRACE':
             block.append(self.parse_statement())
-
-        if not self.peek_token() or self.peek_token()[0] != 'RBRACE':
-            raise CompilerError(f"Unclosed 'if' block. Started in line {start_line}", line=start_line)
-            
         self.eat('RBRACE')
-        return IfNode(left, op, right, block)
+
+        else_block = None
+        if self.peek_token() and self.peek_token()[0] == 'ELSE':
+            self.eat('ELSE')
+            self.eat('LBRACE')
+            else_block = []
+            while self.peek_token() and self.peek_token()[0] != 'RBRACE':
+                else_block.append(self.parse_statement())
+            self.eat('RBRACE')
+            
+        return IfNode(left, op, right, block, else_block)
 
     def parse_program(self):
         stmts = []
@@ -558,7 +585,10 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None)
 
         elif isinstance(stmt, IfNode):
             if_label_count += 1
+            label_else = f"_else_{if_label_count}"
             label_end = f"_endif_{if_label_count}"
+
+            jump_target = label_else if stmt.else_block else label_end
 
             l_asm, l_reg = generate_expression_asm(stmt.left, rm)
             if l_asm: asm.append(l_asm)
@@ -568,16 +598,43 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None)
             if r_asm: asm.append(r_asm)
             rm.usage_map[r_reg] = True
 
-            target_reg = rm.allocate()
-            asm.append(f"movi {target_reg}, {label_end}")
+            t_reg = rm.allocate()
+            asm.append(f"movi {t_reg}, {jump_target}")
 
             if stmt.op == "==":
-                asm.append(f"jne {l_reg}, {r_reg}, {target_reg}")
-            else:
-                asm.append(f"je {l_reg}, {r_reg}, {target_reg}")
+                asm.append(f"jne {l_reg}, {r_reg}, {t_reg}")
+            elif stmt.op == "!=":
+                asm.append(f"je {l_reg}, {r_reg}, {t_reg}")
+            elif stmt.op == "<":
+                asm.append(f"div {l_reg}, {r_reg}")
+                zero_reg = rm.allocate(0)
+                asm.append(f"movi {zero_reg}, 0")
+                asm.append(f"jne {l_reg}, {zero_reg}, {t_reg}")
+                rm.free(zero_reg)
+            elif stmt.op == ">":
+                asm.append(f"div {r_reg}, {l_reg}")
+                zero_reg = rm.allocate(0)
+                asm.append(f"movi {zero_reg}, 0")
+                asm.append(f"jne {r_reg}, {zero_reg}, {t_reg}")
+                rm.free(zero_reg)
+
+            rm.free(l_reg)
+            rm.free(r_reg)
+            rm.free(t_reg)
 
             asm.append(generate_asm(stmt.block, is_sub_block=True, rm=rm, strings_to_embed=strings_to_embed))
+
+            if stmt.else_block:
+                skip_reg = rm.allocate()
+                asm.append(f"movi {skip_reg}, {label_end}")
+                asm.append(f"mov r15, {skip_reg}")
+                rm.free(skip_reg)
+                
+                asm.append(f"{label_else}:")
+                asm.append(generate_asm(stmt.else_block, is_sub_block=True, rm=rm, strings_to_embed=strings_to_embed))
+
             asm.append(f"{label_end}:")
+
             rm.usage_map = {reg: False for reg in rm.available_regs}
             rm.cache.clear()
 
@@ -611,29 +668,47 @@ def generate_expression_asm(node, rm):
     if isinstance(node, DerefNode):
         mode = 1 if node.size == 8 else 0
         addr_asm, addr_reg = generate_expression_asm(node.target, rm)
-
+        
         target_reg = rm.allocate()
         mode_reg = rm.get_reg_with_value(mode)
         mode_asm = ""
         if not mode_reg:
             mode_reg = rm.allocate(mode)
             mode_asm = f"movi {mode_reg}, {mode}\n"
-        
+
         asm = f"{addr_asm}\n{mode_asm}peek {target_reg}, {addr_reg}, {mode_reg}"
         rm.free(addr_reg)
         return asm, target_reg
 
     if isinstance(node, BinOpNode):
         left_asm, left_reg = generate_expression_asm(node.left, rm)
+        rm.usage_map[left_reg] = True 
+
         right_asm, right_reg = generate_expression_asm(node.right, rm)
+        rm.usage_map[right_reg] = True 
 
-        op_cmd = {"+": "add", "-": "sub", "*": "mul", "/": "div"}[node.op]
-        asm = f"{left_asm}\n{right_asm}\n{op_cmd} {left_reg}, {right_reg}"
+        if node.op == "%":
+            mod_instrs = []
+            temp_a = rm.allocate()
 
+            mod_instrs.append(f"mov {temp_a}, {left_reg}")
+            mod_instrs.append(f"div {left_reg}, {right_reg}")
+            mod_instrs.append(f"mul {left_reg}, {right_reg}")
+            mod_instrs.append(f"sub {temp_a}, {left_reg}")
+            mod_instrs.append(f"mov {left_reg}, {temp_a}")
+            
+            rm.free(temp_a)
+            res_asm = f"{left_asm}\n{right_asm}\n" + "\n".join(mod_instrs)
+        else:
+            op_cmd = {"+": "add", "-": "sub", "*": "mul", "/": "div"}[node.op]
+            res_asm = f"{left_asm}\n{right_asm}\n{op_cmd} {left_reg}, {right_reg}"
+
+        rm.free(left_reg) 
         rm.free(right_reg)
+        rm.usage_map[left_reg] = True
+        
         if left_reg in rm.cache: del rm.cache[left_reg]
-
-        return asm, left_reg
+        return res_asm, left_reg
 
     return "", None
 
@@ -646,11 +721,7 @@ if __name__ == "__main__":
     target_sector = int(sys.argv[2])
 
     try:
-        with open(input_file, "r") as f:
-            raw_code = f.read()
-
-        clean_code = strip_comments(raw_code)
-        source_code = preprocess_includes(apply_defines(clean_code), os.path.dirname(input_file))
+        source_code = preprocess(input_file)
 
         tokens = tokenize(source_code)
         parser = Parser(tokens)

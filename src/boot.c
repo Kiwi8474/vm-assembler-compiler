@@ -4,4 +4,5 @@
 #define userspace 0x400
 
 load 1, userspace;
+load 2, 0x600;
 goto userspace;
