@@ -53,11 +53,7 @@ asm {
 print();
 
 uint16 0x87F2 = "\nNewline!";
-asm {
-    movi r0, 0x87F2;
-    push r0;
-}
-print();
+print(0x87F2);
 
 asm {
     movi r0, 0x87F0;

@@ -89,8 +89,9 @@ class FunctionDefNode:
         self.block = block
 
 class CallNode:
-    def __init__(self, name):
+    def __init__(self, name, args=None):
         self.name = name
+        self.args = args if args is not None else []
 
 class ReturnNode:
     def __init__(self, value_node=None):
@@ -297,8 +298,14 @@ class Parser:
             name = self.eat('NAME')[1]
             if self.peek_token() and self.peek_token()[0] == 'LPAREN':
                 self.eat('LPAREN')
+                args = []
+                if self.peek_token() and self.peek_token()[0] != 'RPAREN':
+                    args.append(self.parse_expression())
+                    while self.peek_token() and self.peek_token()[0] == 'COMMA':
+                        self.eat('COMMA')
+                        args.append(self.parse_expression())
                 self.eat('RPAREN')
-                return CallNode(name)
+                return CallNode(name, args)
             return name
 
         self.error(f"Unexpected '{t[1]}'")
@@ -375,9 +382,17 @@ class Parser:
             if next_t and next_t[0] == 'LPAREN':
                 name = self.eat('NAME')[1]
                 self.eat('LPAREN')
+
+                args = []
+                if self.peek_token() and self.peek_token()[0] != 'RPAREN':
+                    args.append(self.parse_expression())
+                    while self.peek_token() and self.peek_token()[0] == 'COMMA':
+                        self.eat('COMMA')
+                        args.append(self.parse_expression())
+                
                 self.eat('RPAREN')
                 self.eat('SEMICOLON')
-                return CallNode(name)
+                return CallNode(name, args)
 
         if t[0] == 'LABEL': 
             return LabelNode(self.eat('LABEL')[1])
@@ -508,14 +523,10 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None)
             asm.append("pop r15")
 
         elif isinstance(stmt, CallNode):
-            call_label_count += 1
-            ret_label = f"_ret_{call_label_count}_{stmt.name}"
-            reg = rm.allocate() 
-            asm.append(f"movi {reg}, {ret_label}")
-            asm.append(f"push {reg}")
-            rm.free(reg)
-            asm.append(f"movi r15, {stmt.name}")
-            asm.append(f"{ret_label}:")
+            call_asm, res_reg = generate_expression_asm(stmt, rm)
+            asm.append(call_asm)
+            asm.append(f"pop {res_reg}") 
+            rm.free(res_reg)
 
         elif isinstance(stmt, LabelNode):
             asm.append(f"{stmt.name}:")
@@ -691,11 +702,19 @@ def generate_expression_asm(node, rm):
     global call_label_count
 
     if isinstance(node, CallNode):
+        global call_label_count
         call_label_count += 1
-        ret_label = f"_ret_{call_label_count}_{node.name}"
+        asm = ""
 
+        for arg in node.args:
+            arg_asm, arg_reg = generate_expression_asm(arg, rm)
+            asm += arg_asm + "\n"
+            asm += f"push {arg_reg}\n"
+            rm.free(arg_reg)
+
+        ret_label = f"_ret_{call_label_count}_{node.name}"
         reg_ret = rm.allocate()
-        asm = f"movi {reg_ret}, {ret_label}\n"
+        asm += f"movi {reg_ret}, {ret_label}\n"
         asm += f"push {reg_ret}\n"
         rm.free(reg_ret)
 
