@@ -146,9 +146,11 @@ public:
         uint16_t imm = (b2 << 8) | b3;
 
         bool jumped = false;
+        bool nop = false;
 
         switch (opcode) {
             case 0x0: { // NOP
+                nop = true;
                 break;
             }
 
@@ -289,6 +291,12 @@ public:
                             memory.begin() + second_part_size, 
                             disk_content.begin() + disk_start + first_part_size);
                 }
+
+                std::ofstream outfile(DISK, std::ios::binary);
+                if (outfile.is_open()) {
+                    outfile.write((char*)disk_content.data(), disk_content.size());
+                    outfile.close();
+                }
                 break;
             }
 
@@ -313,7 +321,9 @@ public:
             }
         }
 
-        if (!jumped) {
+        if (!jumped && !nop) {
+            regs[15] += 3;
+        } else if (nop) {
             regs[15] += 3;
         }
     }
