@@ -1,4 +1,5 @@
 import sys
+import os
 
 isa = {
     "nop": 0x0,
@@ -93,7 +94,7 @@ if __name__ == "__main__":
     bytecode, _ = assemble(input_file)
 
     if len(bytecode) > 512:
-        print(f"Warnung: {input_file} ist mit {len(bytecode)} Bytes zu groß für einen Sektor!")
+        print(f"[Assembler Warning] {input_file} is {len(bytecode)} bytes long and too large for a single sector.")
 
     if len(bytecode) > 0:
         target_size = ((len(bytecode) - 1) // 512 + 1) * 512
@@ -102,10 +103,16 @@ if __name__ == "__main__":
 
     padded_bytecode = bytecode.ljust(target_size, b'\x00')
 
+    disk_path = "disk.bin"
+    if not os.path.exists(disk_path):
+        potential_path = os.path.join("..", "emulator", "disk.bin")
+        if os.path.exists(potential_path):
+            disk_path = potential_path
+            
     try:
-        with open("disk.bin", "r+b") as f:
+        with open(disk_path, "r+b") as f:
             f.seek(target_sector * 512)
             f.write(padded_bytecode)
-        print(f"Erfolg! {input_file} wurde in Sektor {target_sector} geschrieben.")
+        print(f"[Success] Wrote {len(bytecode)} bytes to sector {target_sector} in {disk_path}.")
     except FileNotFoundError:
-        print("Fehler: disk.bin existiert nicht.")
+        print(f"[Assembler Error] disk.bin not found.")

@@ -100,29 +100,26 @@ public:
     VM() : regs(16, 0), memory(65536, 0) {
         setupSharedMemory();
 
-        regs[14] = 0xB000;
+        std::vector<uint8_t> bios_rom = {
+            0x2E, 0xAF, 0xFF,
+            0x20, 0x00, 0x00,
+            0x21, 0x02, 0x00,
+            0xC0, 0x10, 0x00,
+            0x2F, 0x02, 0x00
+        };
+        std::copy(bios_rom.begin(), bios_rom.end(), memory.begin());
 
         std::ifstream file(DISK, std::ios::binary | std::ios::ate);
-
         if (file.is_open()) {
             std::streamsize size = file.tellg();
             file.seekg(0, std::ios::beg);
-
             disk_content.resize(size);
-
-            if (file.read((char*)disk_content.data(), size)) {
-                std::cout << "Disk loaded: " << size << " Bytes." << std::endl;
-            }
+            file.read((char*)disk_content.data(), size);
         } else {
-            std::cerr << "Couldn't find" << DISK << "." << std::endl;
             disk_content.resize(1440 * 1024, 0);
         }
 
-        if (disk_content.size() >= 512) {
-            std::copy(disk_content.begin(), disk_content.begin() + 512, memory.begin() + 0x200);
-            regs[15] = 0x200; 
-            regs[14] = 0xAFFF;
-        }
+        regs[15] = 0x0000;
     }
 
     ~VM() {
@@ -328,7 +325,7 @@ public:
         if (!jumped && !nop) {
             regs[15] += 3;
         } else if (nop) {
-            regs[15] += 3;
+            regs[15] += 1;
         }
     }
 

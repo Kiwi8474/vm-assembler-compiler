@@ -2,7 +2,7 @@ import os
 import datetime
 import sys
 import re
-from assembler import assemble
+from mxa import assemble
 
 class CompilerError(Exception):
     def __init__(self, message, line=None, token=None):
@@ -1008,11 +1008,20 @@ if __name__ == "__main__":
         else:
             target_size = final_sector_count * 512
             padded_bytecode = bytecode.ljust(target_size, b'\x00')
+
+            disk_path = "disk.bin"
+            if not os.path.exists(disk_path):
+                potential_path = os.path.join("..", "emulator", "disk.bin")
+                if os.path.exists(potential_path):
+                    disk_path = potential_path
             
-            with open("disk.bin", "r+b") as f:
-                f.seek(target_sector * 512)
-                f.write(padded_bytecode)
-            print(f"[Success] Wrote {actual_size} bytes to sector {target_sector}.")
+            try:
+                with open(disk_path, "r+b") as f:
+                    f.seek(target_sector * 512)
+                    f.write(padded_bytecode)
+                print(f"[Success] Wrote {actual_size} bytes to sector {target_sector} in {disk_path}.")
+            except FileNotFoundError:
+                raise CompilerError(f"disk.bin not found.")
 
         if "-info" in flags:
             usage = (actual_size / (final_sector_count * 512)) * 100
