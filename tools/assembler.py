@@ -49,9 +49,9 @@ def assemble_line(line, labels):
 
     return bytes([b1, b2, b3])
 
-def assemble(filename):
-    labels = {}
-    current_address = 0x0200
+def assemble(filename, external_labels=None):
+    labels = external_labels.copy() if external_labels else {}
+    current_address = 0x200
     lines_to_process = []
 
     with open(filename, "r") as f:
@@ -80,7 +80,7 @@ def assemble(filename):
         else:
             binary += assemble_line(line, labels)
     
-    return binary
+    return binary, labels
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
@@ -90,7 +90,7 @@ if __name__ == "__main__":
     input_file = sys.argv[1]
     target_sector = int(sys.argv[2])
 
-    bytecode = assemble(input_file)
+    bytecode, _ = assemble(input_file)
 
     if len(bytecode) > 512:
         print(f"Warnung: {input_file} ist mit {len(bytecode)} Bytes zu groß für einen Sektor!")

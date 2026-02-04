@@ -1,7 +1,9 @@
-#org 0x400
-#sectors 3
+#org 0x1000
+#sector 10
+#sectors 4
 
-#include "stdio.c"
+#define text_cursor 0x87D2
+uint16 text_cursor = 0x8000;
 
 #define KEY_IO 0xFFFF
 #define VGA_END 0x87CF
@@ -46,37 +48,17 @@ void check_key_and_type() {
 }
 
 uint16 0x87F0 = "Hallo, Welt!";
-asm {
-    movi r0, 0x87F0;
-    push r0;
-}
-print();
+print(0x87F0);
 
 uint16 0x87F2 = "\nNewline!";
 print(0x87F2);
 
-asm {
-    movi r0, 0x87F0;
-    push r0;
-    movi r0, 0x87F2;
-    push r0;
-}
-
-if strcmp() == 0 {
+if strcmp(0x87F0, 0x87F2) == 0 {
     uint16 0x87F0 = "\nStrings sind gleich!\n";
-    asm {
-        movi r0, 0x87F0;
-        push r0;
-    }
-    print();
 } else {
     uint16 0x87F0 = "\nStrings sind nicht gleich!\n";
-    asm {
-        movi r0, 0x87F0;
-        push r0;
-    }
-    print();
 }
+print(0x87F0);
 
 mainloop:
 if uint8 $running == 1 {

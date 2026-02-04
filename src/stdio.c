@@ -1,20 +1,14 @@
 #define text_cursor 0x87D2
 uint16 text_cursor = 0x8000;
 
-void print() { // erwartet string-adresse auf dem stack
+#export print
+#export strcmp
+#export scroll
+
+void print(arg) { // erwartet string-adresse auf dem stack
     #define arg 0x87E0
     #define str_addr 0x87E2
     #define char 0x87E4
-
-    asm {
-        pop r1;
-        pop r0;
-        push r1;
-
-        movi r1, 0x87E0;
-        movi r2, 0;
-        poke r0, r1, r2;
-    }
 
     uint16 str_addr = $$arg;
 
@@ -48,29 +42,9 @@ void print() { // erwartet string-adresse auf dem stack
     return;
 }
 
-void strcmp() { // erwartet zwei string-adressen auf dem stack
+void strcmp(str_1, str_2) { // erwartet zwei string-adressen auf dem stack
     #define str_1 0x87E0
     #define str_2 0x87E2
-
-    asm {
-        pop r1;
-        pop r0;
-        push r1;
-
-        movi r1, str_2;
-        movi r2, 0;
-        poke r0, r1, r2;
-    }
-
-    asm {
-        pop r1;
-        pop r0;
-        push r1;
-
-        movi r1, str_1;
-        movi r2, 0;
-        poke r0, r1, r2;
-    }
 
     strcmp_loop:
     if uint8 $$$str_1 != uint8 $$$str_2 {
@@ -94,7 +68,7 @@ void scroll() {
     asm {
         movi r0, 0x8000; 
         movi r1, 0x8050; 
-        movi r2, 0x87D0; 
+        movi r2, 0x87D0;
         movi r5, 1; 
         movi r6, 32; 
     }

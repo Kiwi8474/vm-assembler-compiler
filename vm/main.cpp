@@ -100,7 +100,7 @@ public:
     VM() : regs(16, 0), memory(65536, 0) {
         setupSharedMemory();
 
-        regs[14] = 0xAFFF;
+        regs[14] = 0xB000;
 
         std::ifstream file(DISK, std::ios::binary | std::ios::ate);
 

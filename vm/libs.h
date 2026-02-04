@@ -1,0 +1,1 @@
+{"print": 1039, "strcmp": 1321, "scroll": 1525}
