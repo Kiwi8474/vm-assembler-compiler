@@ -177,29 +177,89 @@ def get_combined_source(filepath):
     code = re.sub(include_pattern, replace_match, code)
     return code
 
-def apply_defines(code):
+def handle_conditionals_and_defines(code):
+    lines = code.splitlines()
+    output = []
     defines = {}
-    found = re.findall(r'#define\s+([A-Za-z_][A-Za-z0-9_]*)\s+([^\s\n]+)', code)
-    for name, value in found:
-        defines[name] = value
+    active_stack = [True]
+    condition_met_stack = [True]
 
-    code = re.sub(r'#define\s+.*', '', code)
+    for line_num, line in enumerate(lines, 1):
+        stripped = line.strip()
 
+        if stripped.startswith("#define") and active_stack[-1]:
+            parts = stripped.split()
+            if len(parts) >= 2:
+                name = parts[1]
+                value = " ".join(parts[2:]) if len(parts) > 2 else ""
+                defines[name] = value
+            continue
+
+        if stripped.startswith("#ifdef"):
+            name = stripped.split()[1] if len(stripped.split()) > 1 else ""
+            met = (name in defines)
+            condition_met_stack.append(met)
+            active_stack.append(met and active_stack[-1])
+            continue
+            
+        elif stripped.startswith("#ifndef"):
+            name = stripped.split()[1] if len(stripped.split()) > 1 else ""
+            met = (name not in defines)
+            condition_met_stack.append(met)
+            active_stack.append(met and active_stack[-1])
+            continue
+
+        elif stripped.startswith("#else"):
+            if len(active_stack) <= 1:
+                raise CompilerError(f"Line {line_num}: #else without #ifdef/#ifndef")
+            last_met = condition_met_stack[-1]
+            parent_active = active_stack[-2]
+            active_stack[-1] = (not last_met) and parent_active
+            continue
+
+        elif stripped.startswith("#endif"):
+            if len(active_stack) <= 1:
+                raise CompilerError(f"Line {line_num}: #endif without matching #ifdef")
+            active_stack.pop()
+            condition_met_stack.pop()
+            continue
+
+        if active_stack[-1]:
+            output.append(line)
+
+    if len(active_stack) > 1:
+        raise CompilerError("Missing #endif at end of file.")
+
+    return "\n".join(output), defines
+
+def apply_defines(code, defines):
     for name in sorted(defines.keys(), key=len, reverse=True):
         value = defines[name]
-        code = re.sub(r'\b' + name + r'\b', value, code)
-    
+        code = re.sub(r'\b' + re.escape(name) + r'\b', value, code)
     return code
 
-def extract_exports(code):
+def process_logic_directives(code):
     exports = re.findall(r'#export\s+([A-Za-z_][A-Za-z0-9_]*)', code)
-    clean_code = re.sub(r'#export\s+.*', '', code)
+
+    levels = {"#info": "[Info]", "#debug": "[Debug]", "#warn": "[Warning]"}
+    for prefix, tag in levels.items():
+        messages = re.findall(rf'{prefix}\s+"([^"]+)"', code)
+        for msg in messages:
+            print(f"{tag} {msg}")
+
+    errors = re.findall(r'#error\s+"([^"]+)"', code)
+    if errors:
+        raise CompilerError(f"[FATAL] #error: {errors[0]}")
+
+    clean_code = re.sub(r'#(export|info|debug|warn|error)\s+.*', '', code)
+    
     return clean_code, exports
 
 def preprocess(main_file):
-    full_raw_code = get_combined_source(main_file)
-    code_without_exports, export_list = extract_exports(full_raw_code)
-    final_source = apply_defines(code_without_exports)
+    code = get_combined_source(main_file)
+    code, defines = handle_conditionals_and_defines(code)
+    code = apply_defines(code, defines)
+    final_source, export_list = process_logic_directives(code)
     
     return final_source, export_list
 

@@ -1,38 +1,37 @@
-#define text_cursor 0x87D2
-uint16 text_cursor = 0x8000;
+#ifndef STDIO_H
+#define STDIO_H
+
+uint16 0x87D2 = 0x8000;
 
 #export print
 #export strcmp
 #export scroll
 
-void print(arg) { // erwartet string-adresse auf dem stack
-    #define arg 0x87E0
-    #define str_addr 0x87E2
-    #define char 0x87E4
+void print(0x87E0) { // erwartet string-adresse auf dem stack
 
-    uint16 str_addr = $$arg;
+    uint16 0x87E2 = $$0x87E0;
 
     print_loop:
-    uint16 char = uint8 $$str_addr;
+    uint16 0x87E4 = uint8 $$0x87E2;
 
-    if $char != 0 {
-        if $char == 10 {
-            uint16 text_cursor = uint16 $text_cursor - ((uint16 $text_cursor - 0x8000) % 80) + 80;
-            if uint16 $text_cursor > 0x87CF {
+    if $0x87E4 != 0 {
+        if $0x87E4 == 10 {
+            uint16 0x87D2 = uint16 $0x87D2 - ((uint16 $0x87D2 - 0x8000) % 80) + 80;
+            if uint16 $0x87D2 > 0x87CF {
                 scroll();
             }
             goto next_char;
         }
 
-        uint8 $text_cursor = $char;
-        uint16 text_cursor = $text_cursor + 1;
+        uint8 $0x87D2 = $0x87E4;
+        uint16 0x87D2 = $0x87D2 + 1;
 
-        if uint16 $text_cursor > 0x87CF {
+        if uint16 $0x87D2 > 0x87CF {
             scroll();
         }
 
         next_char:
-        uint16 str_addr = $str_addr + 1;
+        uint16 0x87E2 = $0x87E2 + 1;
         goto print_loop;
     } else {
         goto print_end;
@@ -42,25 +41,23 @@ void print(arg) { // erwartet string-adresse auf dem stack
     return;
 }
 
-void strcmp(str_1, str_2) { // erwartet zwei string-adressen auf dem stack
-    #define str_1 0x87E0
-    #define str_2 0x87E2
+void strcmp(0x87E0, 0x87E2) { // erwartet zwei string-adressen auf dem stack
 
     strcmp_loop:
-    if uint8 $$$str_1 != uint8 $$$str_2 {
+    if uint8 $$$0x87E0 != uint8 $$$0x87E2 {
         return 1;
     }
 
-    if uint8 $$$str_1 == 0 {
+    if uint8 $$$0x87E0 == 0 {
         return 0;
     }
 
-    if uint8 $$$str_2 == 0 {
+    if uint8 $$$0x87E2 == 0 {
         return 0;
     }
 
-    uint16 $str_1 = uint16 $$str_1 + 1;
-    uint16 $str_2 = uint16 $$str_2 + 1;
+    uint16 $0x87E0 = uint16 $$0x87E0 + 1;
+    uint16 $0x87E2 = uint16 $$0x87E2 + 1;
     goto strcmp_loop;
 }
 
@@ -104,6 +101,8 @@ void scroll() {
     }
 
     done_scroll:
-    uint16 text_cursor = 0x8780;
+    uint16 0x87D2 = 0x8780;
     return;
 }
+
+#endif
