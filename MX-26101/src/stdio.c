@@ -9,13 +9,13 @@ uint16 0x87D2 = 0x8000;
 
 void print(0x87E0) { // erwartet string-adresse auf dem stack
 
-    uint16 0x87E2 = $$0x87E0;
+    uint16 0x87E2 = uint16 $$0x87E0;
 
     print_loop:
     uint16 0x87E4 = uint8 $$0x87E2;
 
-    if $0x87E4 != 0 {
-        if $0x87E4 == 10 {
+    if uint16 $0x87E4 != 0 {
+        if uint16 $0x87E4 == 10 {
             uint16 0x87D2 = uint16 $0x87D2 - ((uint16 $0x87D2 - 0x8000) % 80) + 80;
             if uint16 $0x87D2 > 0x87CF {
                 scroll();
@@ -23,15 +23,15 @@ void print(0x87E0) { // erwartet string-adresse auf dem stack
             goto next_char;
         }
 
-        uint8 $0x87D2 = $0x87E4;
-        uint16 0x87D2 = $0x87D2 + 1;
+        uint8 $0x87D2 = uint16 $0x87E4;
+        uint16 0x87D2 = uint16 $0x87D2 + 1;
 
         if uint16 $0x87D2 > 0x87CF {
             scroll();
         }
 
         next_char:
-        uint16 0x87E2 = $0x87E2 + 1;
+        uint16 0x87E2 = uint16 $0x87E2 + 1;
         goto print_loop;
     } else {
         goto print_end;

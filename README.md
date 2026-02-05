@@ -7,9 +7,9 @@
 - [2\. The MX-Nomenclature](#2-the-mx-nomenclature)
 - [3\. Core Architecture (MX-26101)](#3-core-architecture-mx-26101)
 - [4\. System Deployment](#4-system-deployment)
-    -[4.1 Compilation](#41-compilation)
-    -[4.2 Graphics Subsystem](#42-graphics-subsystem)
-    -[4.3 Automated Boot](#43-automated-boot)
+    - [4.1 Compilation](#41-compilation)
+    - [4.2 Graphics Subsystem](#42-graphics-subsystem)
+    - [4.3 Automated Boot](#43-automated-boot)
 
 ---
 

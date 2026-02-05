@@ -60,11 +60,8 @@ if strcmp(0x87F0, 0x87F2) == 0 {
 }
 print(0x87F0);
 
-mainloop:
-if uint8 $running == 1 {
+while uint8 $running == 1 {
     check_key_and_type();
-    goto mainloop;
 }
 
-done:
-goto done;
+while 1 == 1 {}

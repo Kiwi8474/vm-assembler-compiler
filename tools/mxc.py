@@ -119,12 +119,21 @@ class InlineAsmNode:
         self.source_line = source_line
     def __repr__(self): return f"InlineAsm({self.content[:20]}...)"
 
+class WhileNode:
+    def __init__(self, left, op, right, block, source_line=None):
+        self.left = left
+        self.op = op
+        self.right = right
+        self.block = block
+        self.source_line = source_line
+
 TOKEN_SPEC = [
     ('ASM',       r'asm\b'),
     ('TYPE',       r'uint8\b|uint16\b'),
     ('DIRECTIVE', r'#[A-Za-z_]+'),
     ('NUMBER',    r'(0x[0-9A-Fa-f]+|\d+)'),
     ('IF',        r'if\b'),
+    ('WHILE',        r'while\b'),
     ('ELSE',       r'else\b'),
     ('EQ',        r'=='),
     ('NE',        r'!='),
@@ -352,7 +361,7 @@ class Parser:
         self.pos += 1
         return token
 
-    def parse_factor(self, size=16):
+    def parse_factor(self, size=None):
         current_size = size
         t = self.peek_token()
         if not t: return None
@@ -377,11 +386,14 @@ class Parser:
             val = ord(self.eat('CHAR')[1][1])
             return NumberNode(val, size=8)
         elif t[0] == 'DEREF':
+            if current_size is None:
+                self.error("Explicit type required before dereference.")
             self.eat('DEREF')
-            addr = self.parse_factor(size=16)
+            addr = self.parse_factor(size=16) 
             return DerefNode(addr, size=current_size)
         elif t[0] == 'NUMBER':
             val_str = self.eat('NUMBER')[1]
+            if current_size is None: current_size = 16 
             try:
                 val_int = int(val_str, 0)
             except:
@@ -405,11 +417,11 @@ class Parser:
 
         self.error(f"Unexpected '{token[1]}'")
 
-    def parse_expression(self):
-        node = self.parse_factor()
+    def parse_expression(self, size=None):
+        node = self.parse_factor(size=size)
         while self.peek_token() and self.peek_token()[0] == 'OP':
             op = self.eat('OP')[1]
-            node = BinOpNode(node, op, self.parse_factor())
+            node = BinOpNode(node, op, self.parse_factor(size=size))
         return node
 
     def parse_statement(self):
@@ -507,6 +519,11 @@ class Parser:
             node.source_line = current_line_text
             return node
 
+        if t[0] == 'WHILE':
+            node = self.parse_while()
+            node.source_line = current_line_text
+            return node
+
         if t[0] == 'OUT':
             self.eat('OUT')
             port = self.parse_expression()
@@ -515,17 +532,23 @@ class Parser:
             self.eat('SEMICOLON')
             return OutNode(port, data, source_line=current_line_text)
 
-        current_size = 16
         if t[0] == 'TYPE':
-            self.eat('TYPE')
-            current_size = 8 if t[1] == 'uint8' else 16
-            t = self.peek_token()
+            type_token = self.eat('TYPE')
+            current_size = 8 if type_token[1] == 'uint8' else 16
 
-        if t[0] in ['NUMBER', 'DEREF', 'NAME']:
-            node = self.parse_assignment(current_size)
-            node.source_line = current_line_text
-            self.eat('SEMICOLON')
-            return node
+            t = self.peek_token()
+            if t and t[0] in ['NUMBER', 'DEREF', 'NAME']:
+                node = self.parse_assignment(current_size)
+                self.eat('SEMICOLON')
+                return node
+            else:
+                self.error(f"Expected assignment after type '{type_token[1]}'")
+
+        if t[0] in ['NUMBER', 'DEREF']:
+            self.error(f"Explicit type required for assignment at '{t[1]}'")
+
+        if t[0] == 'NAME':
+            self.error(f"Explicit type required before variable/address '{t[1]}'")
 
         if t[0] in ['LOAD', 'SAVE']:
             stmt_type = self.eat()[0]
@@ -541,12 +564,12 @@ class Parser:
         self.error(f"Syntax error at {t}")
 
     def parse_assignment(self, size):
-        target = self.parse_factor() 
+        target = self.parse_factor(size=size) 
         if isinstance(target, DerefNode):
             target.size = size
             
         self.eat('ASSIGN')
-        value = self.parse_expression()
+        value = self.parse_expression(size=size)
         return AssignNode(target, value, size=size)
 
     def parse_goto(self):
@@ -585,6 +608,22 @@ class Parser:
             
         return IfNode(left, op, right, block, else_block)
 
+    def parse_while(self):
+        while_token = self.eat('WHILE')
+        start_line = while_token[2]
+        
+        left = self.parse_expression()
+        op = self.eat()[1]
+        right = self.parse_expression()
+        
+        self.eat('LBRACE')
+        block = []
+        while self.peek_token() and self.peek_token()[0] != 'RBRACE':
+            block.append(self.parse_statement())
+        self.eat('RBRACE')
+            
+        return WhileNode(left, op, right, block)
+
     def parse_program(self):
         stmts = []
         while self.peek_token(): stmts.append(self.parse_statement())
@@ -607,7 +646,7 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None,
             if isinstance(s, DirectiveNode) and s.name == "#org":
                 asm.append(f".org {hex(s.value)}")
                 found_org = True
-        if not found_org: asm.append(".org 0x0400")
+        if not found_org: raise CompilerError("Missing #org directive.")
 
     for stmt in statements:
         if hasattr(stmt, 'source_line') and stmt.source_line:
@@ -821,6 +860,51 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None,
             rm.usage_map = {reg: False for reg in rm.available_regs}
             rm.cache.clear()
 
+        elif isinstance(stmt, WhileNode):
+            if_label_count += 1
+            label_start = f"_while_start_{if_label_count}"
+            label_end = f"_while_end_{if_label_count}"
+
+            asm.append(f"{label_start}:")
+
+            l_asm, l_reg = generate_expression_asm(stmt.left, rm, external_symbols)
+            if l_asm: asm.append(l_asm)
+            rm.usage_map[l_reg] = True
+
+            r_asm, r_reg = generate_expression_asm(stmt.right, rm, external_symbols)
+            if r_asm: asm.append(r_asm)
+            rm.usage_map[r_reg] = True
+
+            t_reg = rm.allocate()
+            asm.append(f"movi {t_reg}, {label_end}")
+
+            if stmt.op == "==":
+                asm.append(f"jne {l_reg}, {r_reg}, {t_reg}")
+            elif stmt.op == "!=":
+                asm.append(f"je {l_reg}, {r_reg}, {t_reg}")
+            elif stmt.op == "<":
+                asm.append(f"div {l_reg}, {r_reg}")
+                z_reg = rm.allocate(0); asm.append(f"movi {z_reg}, 0")
+                asm.append(f"jne {l_reg}, {z_reg}, {t_reg}"); rm.free(z_reg)
+            elif stmt.op == ">":
+                asm.append(f"div {r_reg}, {l_reg}")
+                z_reg = rm.allocate(0); asm.append(f"movi {z_reg}, 0")
+                asm.append(f"jne {r_reg}, {z_reg}, {t_reg}"); rm.free(z_reg)
+
+            rm.free(l_reg); rm.free(r_reg); rm.free(t_reg)
+
+            asm.append(generate_asm(stmt.block, is_sub_block=True, rm=rm, strings_to_embed=strings_to_embed, external_symbols=external_symbols))
+
+            jump_reg = rm.allocate()
+            asm.append(f"movi {jump_reg}, {label_start}")
+            asm.append(f"mov r15, {jump_reg}")
+            rm.free(jump_reg)
+
+            asm.append(f"{label_end}:")
+            
+            rm.usage_map = {reg: False for reg in rm.available_regs}
+            rm.cache.clear()
+
     if not is_sub_block:
         asm.append("\n; --- End of Main Program ---")
         asm.append("movi r15, 0xFFFF")
@@ -965,7 +1049,10 @@ if __name__ == "__main__":
                     reserved_sectors = s.value
 
         if target_sector is None:
-            raise CompilerError("Missing '#sector' directive.")
+            raise CompilerError("Missing or invalid '#sector' directive.")
+
+        if reserved_sectors <= 0:
+            raise CompilerError("Missing or invalid '#sectors' directive. Must be at least 1.")
 
         asm_code = generate_asm(statements, external_symbols=external_symbols)
 
