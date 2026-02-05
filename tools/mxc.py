@@ -19,7 +19,7 @@ class CompilerError(Exception):
 class NumberNode:
     def __init__(self, value, size=16, source_line=None):
         if value is None:
-            raise CompilerError("Parser hat 'None' geliefert! :D")
+            raise CompilerError("Parser delivered 'None'.")
 
         if isinstance(value, str):
             try:
