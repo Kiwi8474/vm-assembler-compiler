@@ -111,7 +111,7 @@ In MX-C, types are not "locked" to a memory address. The type keyword (uint8/uin
 ```c
 uint16 0x87D0 = 0xABCD;
 uint8 0x87E0 = uint8 $0x87D0;
-uint8 0x87E1 = uint8 $0x87E1;
+uint8 0x87E1 = uint8 $0x87D1;
 ```
 
 **Note on Endianness:** MX-C follows the Big-Endian architecture of the MX-26 series. The most significant byte (MSB) is stored at the lower address.
