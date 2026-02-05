@@ -2,14 +2,6 @@
 #sector 0
 #sectors 1
 
-uint8 0x87C9 = 'B';
-uint8 0x87CA = 'o';
-uint8 0x87CB = 'o';
-uint8 0x87CC = 't';
-uint8 0x87CD = 'i';
-uint8 0x87CE = 'n';
-uint8 0x87CF = 'g';
-
 load 1, 0x400;
 load 2, 0x600;
 load 3, 0x800;

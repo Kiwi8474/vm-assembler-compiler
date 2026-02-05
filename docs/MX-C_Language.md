@@ -7,10 +7,11 @@
 - [2\. Basic Syntax & Data Types](#2-basic-syntax--data-types)
     - [2.1 Strict Typing requirement](#21-strict-typing-requirement)
     - [2.2 Memory Access & Dereferencing](#22-memory-access--dereferencing)
-    - [2.3 Strings](#23-strings)
-    - [2.4 Flexible Typing & Casting](#24-flexible-typing--casting)
-    - [2.5 Operators](#25-operators)
-    - [2.6 Literals](#26-literals)
+    - [2.3 Variables (def)](#23-variables-def)
+    - [2.4 Arrays & Strings](#24-arrays--strings)
+    - [2.5 Flexible Typing & Casting](#25-flexible-typing--casting)
+    - [2.6 Operators](#26-operators)
+    - [2.7 Literals](#27-literals)
 - [3\. Compiler Directives](#3-compiler-directives)
     - [3.1 Symbolic Names (#define)](#31-symbolic-names-define)
     - [3.2 File Inclusion (#include)](#32-file-inclusion-include)
@@ -70,53 +71,83 @@ MX-C is strictly typed. Every memory operation (assignment, dereference, or cast
 Unlike higher-level languages, MX-C does not infer types from context. You must explicitly state the data width for every operation.
 
 **Rules:**
-- **Assignments:** A type must precede the target address.
-- **Value Access ($\)**: When reading a value from memory, a type must be placed before the \$ operator.
-- **Literals:** Constants default to uint16 unless a cast is used.
+- **Assignments:** A type must precede the target address or variable name.
+- **Value Access ($\)**: When reading a value from a variable or memory, a type must be placed before the \$ operator.
 
 **Example:**
 ```c
-uint16 0x87D0 = 0xABCD; // Correct: Explicit 16-bit assignment
-uint8 $0x87D0 = 0xFF; // Correct: Explicit 8-bit write via pointer
+uint16 0x87D0 = 0xABCD; // Legacy: Explicit 16-bit assignment
+uint8 $0x87D0 = 0xFF; // Legacy: Explicit 8-bit write via pointer
 0x87D0 = 5; // Error: Missing type keyword
+def uint16 my_var = 5; // Modern: Explicit 16-bit variable definition
+uint8 $my_var = 0xFF; // Correct: Explicit 8-bit write to variable location
 ```
 
 ### 2.2 Memory Access & Dereferencing
-In MX-C, there is a strict distinction between a memory address (a literal uint16) and its value.
+MX-C distinguishes between a memory location (address or variable name) and its stored value.
+
 - **Literal Address:** Writing a hex value (e.g., 0x8000) refers to the address location itself.
 - **Value Access (\$):** The `$` operator is used to access the data stored at a specific address.
 
 | Syntax | Description | Example |
 | :--- | :--- | :--- |
 | `0xXXXX` | The raw address | `uint16 0x87D0 = 5;` |
-| `$0xXXXX` | The value at the address | `if $0x87D0 == 5 { ... }` |
-| `$$0xXXXX` | Double dereference (Pointer-Pointer) | `uint16 $$0x87D0 = 1;` |
+| `name` | Variable address (Modern) | `uint16 my_var = 10;` |
+| `$name` | Value at address/variable | `if uint16 $my_var == 10 { ... }` |
+| `$$name` | Double dereference (Pointer) | `uint16 $$my_ptr = 1;` |
 
-### 2.3 Strings
-MX-C supports string literals enclosed in double qoutes. When a string is defined, the compiler automatically stores it as a null-terminated byte sequence and returns a memory address of the first character of the string if used in an expression.
+### 2.3 Variables (def)
+The `def` keyword is used to define named variables. The compiler automatically assigns a safe memory address to these names, preventing collisions that often occur with manual hex-mapping.
+
+**Note:** Definitions are only allowed at the top-level of your code. They cannot be placed inside `if` blocks, `while` loops, or functions. Variables must also be initialized with a literal (number or char) before they can hold results from expressions or functions.
 
 **Example:**
 ```c
-#define msg 0x87D0
-uint16 msg = "Hello, World!";
-out 0x01, $$msg; // Outputs 'H' to the character port
+def uint16 player_score = 0;
+uint16 player_score = uint16 $player_score + 10;
 ```
 
-### 2.4 Flexible Typing & Casting
-In MX-C, types are not "locked" to a memory address. The type keyword (uint8/uint16) acts as an instruction for the compiler on how many bytes to read or write at that specific moment.
-- **Default behavior:** If no type is specified, the compiler defaults to uint16.
-- **On-the-fly casting:** You can treat any address as a different type at any time.
+### 2.4 Arrays & Strings
+Strings and arrays are contiguous blocks of memory. To optimize speed, MX-C uses a Length-Prefix strategy.
+
+**Layout:** For every arrray, the compiler stores its length as a uint16 immediately before the actual data.
+- The `_len` label points to the length field.
+- The main label (e.g., `my_array`) points to the first data element.
+
+**Accessing Data & Metadata:**
+- **Data:** Use the variable name directly
+- **Length:** Access the `_len` label or use the prefix-offset: `uint16 $(my_array - 2)`
+
+**Array Definition Syntax:** Arrays are defined using curly braces `{}`. No size specification is needed; the compiler calculates it automatically.
+
+**Example:**
+```c
+def uint8 my_bytes = {10, 20, 30}; // my_bytes_len will be 3
+def uint16 my_words = {'A', 'B', 'C'}; // my_words_Len will be 3
+```
+
+**Strings:** When defining a string, the variable holds the start address of the character sequence and _not_ the first character of the string.
+
+**Example:**
+```c
+def uint16 message = "Hello, World!\n"; // 'message' points to the 'H' and does not contain the 'H'
+```
+
+### 2.5 Flexible Typing & Casting
+Types are not "locked" to a memory address. The type keyword acts as an instruction for the compiler on how to interpret the bytes at that moment.
 
 **Example:** This is particularly useful for splitting a 16-bit word into two 8-bit bytes.
 ```c
-uint16 0x87D0 = 0xABCD;
-uint8 0x87E0 = uint8 $0x87D0;
-uint8 0x87E1 = uint8 $0x87D1;
+def uint16 combined = 0xABCD;
+def uint8 high_byte = 0;
+def uint8 low_byte = 0;
+uint8 high_byte = uint8 $combined; // Reads 0xAB
+uint8 low_byte = uint8 $(combined+1); // Reads 0xCD
 ```
 
 **Note on Endianness:** MX-C follows the Big-Endian architecture of the MX-26 series. The most significant byte (MSB) is stored at the lower address.
 
-### 2.5 Operators
+### 2.6 Operators
 | Operator | Description |
 | :--- | :--- |
 | `+` | Adds two values |
@@ -126,7 +157,7 @@ uint8 0x87E1 = uint8 $0x87D1;
 | `%` | Applies a modulo-operation to two values |
 | `( )` | Since the compiler cannot multiply before it adds, parantheses are used in long operations |
 
-### 2.6 Literals
+### 2.7 Literals
 MX-C supports different ways to represent constant values:
 - **Integer Literals:** Can be written in decimal or hexadecimal
 - **Character Literals:** Single characters enclosed in single qoutes. The compiler automatically converts these to their corresponding 8-bit ASCII value.
@@ -203,6 +234,8 @@ These directives define where and how the program is stored on the MX-system.
 ## 4. Control Flow
 MX-C follows a minimalist approach to branching. Logical evaluations do not require parantheses, reducing visual clutter and mapping directly to CPU status flags.
 
+**Note:** You cannot use the def keyword inside a control flow block. All variables must be declared at the top-level scope.
+
 ### 4.1 Conditional Branching (if)
 The `if` statement evaluates a single condition. If the condition is met, the code within the mandatory curly braces `{ }` is executed.
 
@@ -271,7 +304,7 @@ while uint16 $COUNTER < 10 {
 Functions allow the encapsulation of logic and the reuse of code blocks. In MX-C, functions are defined using a specific memory-mapping syntax for parameters.
 
 ### 5.1 Declaration & Parameter Storage
-To define a function, use the `void` keyword followed by the function name. Parameters are declared by specifying the memory address where the passed value should be stored.
+To define a function, use the `void` keyword followed by the function name. Parameters are declared by providing existing variable names (modern) or specifying the memory address where the passed value should be stored (legacy). When a function is called, the arguments are popped from the stack and stored in these locations.
 
 **Format:**
 ```c
@@ -281,45 +314,51 @@ void <name>(<address1>, <address2>, ...) {
 }
 ```
 
-**Example:**
+**Modern Syntax Example (Recommended):**
 ```c
-// The caller pushes a value; the function stores it at 0x87E0
-void print(0x87E0) {
-    // Within this block, 0x87E0 holds the passed argument.
-    // We can now use it directly:
-    uint16 0x87E2 = $0x87E0;
+def uint16 global_counter_ptr = 0;
+def uint16 amount_ptr = 0;
+void add_global_counter(amount_ptr) {
+    uint16 global_counter_ptr = uint16 $global_counter_ptr + uint16 $amount_ptr;
+    return;
+}
+```
+
+**Legacy Syntax (still supported):**
+```c
+void add_global_counter(0x87E0) {
+    uint16 0x87E2 = uint16 $0x87E2 + uint16 $0x87E0;
     return;
 }
 ```
 
 ### 5.2 Calling Functions
-A function is called by its name followed by the arguments in parentheses. Arguments can be literals, addresses or expressions.
+A function is called by its name followed by arguments in parentheses. Arguments are pushed onto the hardware stack (r14) before the jump.
 
 **Example:**
 ```c
-#define MY_STRING 0x9000
-print(MY_STRING); // Passes the address 0x9000 to the function
+strcmp(addr1, addr2); // Pushes addr2, then addr1, then calls strcmp
 ```
 
 ### 5.3 Return Values
-Functions can return a value to the caller. A function call can therefore be used as a value within an expression, such as an assignment or a condition. Functions in MX-C can return either no value or exactly one value.
+Functions can return a single value using the `return <value>;` statement. The result is typically passed back via a dedicated register (handled by the compiler), allowing function calls to be used in expressions.
 
 - **Void Return:** Used to simply exit the function. `return;`
 - **Value Return:** Used to pass a result back to the caller. The result can be a literal, an address or a complex expression. `return $0x87E0 + 5;`
 
 **Example:**
 ```c
-#define result 0x87D0
-uint16 result = calculate_sum(5, 10);
-
-if get_status() == 1 {
+if strcmp(str1, str2) == 0 {
     // ...
 }
 ```
 
 ### 5.4 Important Constraints
+- **Initialization of Parameters:** While parameters are defined in the function header, any additional "local" variables used inside the function must be defined using `def` at the top-level (outside the function) and initialized with a literal or array before use.
+- **Static Parameter Mapping:** Parameters in MX-C are not stored on a dynamic stack. They are aliases for fixed RAM addresses (defined via def at the top-level).
+- **Non-Recursion:** Because each parameter points to a unique, fixed memory location, functions cannot call themselves. A recursive call would overwrite the parameters of the parent call, leading to immediate data corruption.
+- **Global Scope Side-Effect:** Parameters are essentially global variables. Modifying a parameter inside a function is identical to modifying its corresponding def variable anywhere else.
 - **Return Statement:** Every function must have at least one `return;` statement (or `return <value>;`) in every possible execution path.
-- **Non-Recursion:** Due to the static nature of parameter mapping, functions in MX-C are not recursive. Calling a function within itself will lead to unpredictable results as parameter addresses are overwritten.
 
 ## 6. Inline Assembly
 For performance-critical tasks, special CPU instructions, or direct hardware access, MX-C allows you to embed raw MX-ASM code directly.
@@ -457,24 +496,27 @@ When creating libraries or header files, always wrap the content in a conditiona
 
 **Example:**
 ```c
-#ifndef STDIO_C
-#define STDIO_C
+#ifndef STDIO_H
+#define STDIO_H
 
-void print(0x87E0) {
+def print_addr_ptr = 0;
+void print(print_addr_ptr) {
     // ...
-    return;
 }
 
 #endif
 ```
 
 ### 9.4 Function Parameter Tagging
-Since parameters are mapped to fixed addresses, name them clearly to avoid "address collision" (two functions using the same address for different parameters) or ensure, that they do not operate at the same time if using the same address.
+Since MX-C uses global scope for all `def` variables and static parameter mapping, name collisions can lead to critical bugs.
 
-**Example:**
+- **Prefixing:** Always prefix variables used as function parameters with the function name (e.g., print_ptr).
+- **Reuse with Caution:** ONly reuse variable for different functions if you are absolutely certain those functions will never be active at the same time.
+
+**Modern Example:**
 ```c
-#define P_PRINT_CHAR 0x87E0
-void print(P_PRINT_CHAR) {
+def uint16 scroll_target = 0; // Prefixed for the scroll function
+void scroll(scroll_target) {
     // ...
 }
 ```
@@ -495,8 +537,11 @@ Common issues and how to solve them:
 | Issue | Cause | Solution |
 | :--- | :--- | :--- |
 | "Overwritten Params" | Non-recursive function called itself | Use a manual stack or seperate addresses |
-| "Garbage MMIO Data" | Used uint16 on 8-bit MMIO port | Always use `uint8` for MMIO ports |
-| "Jump out of range" | `#org mismatch` | Ensure `#org` matches the actual load address |
+| "Garbage MMIO Data" | Used `uint16` on 8-bit MMIO port | Always use `uint8` for MMIO ports |
+| "Jump out of range" | `#org` mismatch | Ensure `#org` matches the actual load address |
+| "Can't define global variables inside nested blocks" | `def` used inside an if-, while- or function-block | Move the `def` line to the very top of your file, outside of all `{ }` brackets |
+| "Variable not defined" | Used a name in a function header or assignment that wasn't created via `def` | Add `def uint16 <name> = 0;` at the top-level of your code. |
+| "Array Length Offset" | Pointer arithmetic went into the length field. | Remember: `my_array` points to data, `my_array - 2` points to the length. |
 
 ---
 

@@ -68,6 +68,10 @@ def assemble(filename, external_labels=None):
                 data_parts = line[3:].split(",")
                 lines_to_process.append((current_address, line))
                 current_address += len(data_parts)
+            elif line.startswith(".dw"):
+                data_parts = line[3:].split(",")
+                lines_to_process.append((current_address, line))
+                current_address += len(data_parts) * 2
             else:
                 lines_to_process.append((current_address, line))
                 current_address += 3
@@ -78,6 +82,16 @@ def assemble(filename, external_labels=None):
             data_parts = line[3:].split(",")
             for val_str in data_parts:
                 binary += bytes([int(val_str.strip(), 0)])
+        elif line.startswith(".dw"):
+            data_parts = line[3:].split(",")
+            for val_str in data_parts:
+                val = 0
+                val_str = val_str.strip()
+                if val_str in labels:
+                    val = labels[val_str]
+                else:
+                    val = int(val_str, 0)
+                binary += bytes([(val >> 8) & 0xFF, val & 0xFF])
         else:
             binary += assemble_line(line, labels)
     

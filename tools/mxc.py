@@ -18,10 +18,19 @@ class CompilerError(Exception):
 
 class NumberNode:
     def __init__(self, value, size=16, source_line=None):
-        self.value = int(value, 0) if isinstance(value, str) else value
+        if value is None:
+            raise CompilerError("Parser hat 'None' geliefert! :D")
+
+        if isinstance(value, str):
+            try:
+                self.value = int(value, 0)
+            except ValueError:
+                self.value = value
+        else:
+            self.value = value
+            
         self.size = size
         self.source_line = source_line
-    def __repr__(self): return f"Num({self.value}, {self.size}bit)"
 
 class DerefNode:
     def __init__(self, target_node, size=16, source_line=None):
@@ -127,7 +136,21 @@ class WhileNode:
         self.block = block
         self.source_line = source_line
 
+class GlobalVarNode:
+    def __init__(self, name, size, value, source_line=None):
+        self.name = name
+        self.size = size
+        self.value = value
+        self.source_line = source_line
+
+class ArrayNode:
+    def __init__(self, elements, size=16, source_line=None):
+        self.elements = elements
+        self.size = size
+        self.source_line = source_line
+
 TOKEN_SPEC = [
+    ('DEF',       r'def\b'),
     ('ASM',       r'asm\b'),
     ('TYPE',       r'uint8\b|uint16\b'),
     ('DIRECTIVE', r'#[A-Za-z_]+'),
@@ -337,6 +360,8 @@ class Parser:
         self.pos = 0
         self.source_lines = full_source.split('\n')
         self.external_symbols = external_symbols if external_symbols else {}
+        self.defined_globals = set()
+        self.nesting_level = 0
 
     def get_source_comment(self, line_num):
         if line_num and line_num <= len(self.source_lines):
@@ -399,6 +424,7 @@ class Parser:
             except:
                 val_int = 0
             return NumberNode(val_int, size=current_size)
+
         if t[0] == 'NAME':
             name = self.eat('NAME')[1]
             if self.peek_token() and self.peek_token()[0] == 'LPAREN':
@@ -411,7 +437,7 @@ class Parser:
                         args.append(self.parse_expression())
                 self.eat('RPAREN')
                 return CallNode(name, args)
-            return name
+            return NumberNode(name, size=current_size if current_size else 16)
 
         self.error(f"Unexpected '{t[1]}'")
 
@@ -430,16 +456,55 @@ class Parser:
 
         current_line_text = self.get_source_comment(t[2])
 
+        if t[0] == 'DEF':
+            if self.nesting_level > 0:
+                self.error("Can't define global variables inside nested blocks.")
+
+            self.eat('DEF')
+            type_token = self.eat('TYPE')
+            size = 8 if type_token[1] == 'uint8' else 16
+
+            var_name = self.eat('NAME')[1]
+
+            if var_name in self.defined_globals:
+                self.error(f"Variable '{var_name}' already exists.")
+
+            self.defined_globals.add(var_name)
+            self.eat('ASSIGN')
+
+            if self.peek_token() and self.peek_token()[0] == 'LBRACE':
+                self.eat('LBRACE')
+                elements = []
+
+                if self.peek_token() and self.peek_token()[0] != 'RBRACE':
+                    elements.append(self.parse_expression(size=size))
+                    while self.peek_token() and self.peek_token()[0] == 'COMMA':
+                        self.eat('COMMA')
+                        elements.append(self.parse_expression(size=size))
+                
+                self.eat('RBRACE')
+                val_node = ArrayNode(elements, size=size, source_line=current_line_text)
+            else:
+                val_node = self.parse_expression(size=size)
+
+            self.eat('SEMICOLON')
+
+            return GlobalVarNode(var_name, size, val_node, source_line=current_line_text)
+
         if t[0] == 'ASM':
             self.eat('ASM')
             self.eat('LBRACE')
             asm_content = ""
             while self.peek_token() and self.peek_token()[0] != 'RBRACE':
                 token_type, token_value, _ = self.eat()
+                
                 if token_type == 'SEMICOLON':
                     asm_content += "\n"
+                elif token_type == 'LABEL':
+                    asm_content += token_value.strip() + "\n" 
                 else:
                     asm_content += token_value + " "
+            
             self.eat('RBRACE')
             return InlineAsmNode(asm_content, source_line=current_line_text)
 
@@ -450,12 +515,19 @@ class Parser:
             self.eat('LPAREN')
             params = []
             if self.peek_token()[0] != 'RPAREN':
-                params.append(self.eat('NUMBER')[1])
+                param_token = self.peek_token()
+                if param_token[0] == 'NAME' or param_token[0] == 'NUMBER':
+                    params.append(self.eat()[1])
                 while self.peek_token()[0] == 'COMMA':
                     self.eat('COMMA')
-                    params.append(self.eat('NUMBER')[1])
+                    next_param = self.peek_token()
+                    if next_param[0] in ['NAME', 'NUMBER']:
+                        params.append(self.eat()[1])
+                    else:
+                        self.error("Expected parameter name or number")
             self.eat('RPAREN')
             self.eat('LBRACE')
+            self.nesting_level += 1
 
             block = []
             while self.peek_token() and self.peek_token()[0] != 'RBRACE':
@@ -465,6 +537,7 @@ class Parser:
                 raise CompilerError(f"Unclosed function '{name}'. Started in line {start_line}", line=start_line)
 
             self.eat('RBRACE')
+            self.nesting_level -= 1
 
             def check_for_return(stmts):
                 for s in stmts:
@@ -500,6 +573,7 @@ class Parser:
                 self.eat('RPAREN')
                 self.eat('SEMICOLON')
                 return CallNode(name, args, source_line=current_line_text)
+            return NumberNode(name, size=current_size if current_size else 16)
 
         if t[0] == 'LABEL': 
             return LabelNode(self.eat('LABEL')[1], source_line=current_line_text)
@@ -592,19 +666,23 @@ class Parser:
         right = self.parse_expression()
         
         self.eat('LBRACE')
+        self.nesting_level += 1
         block = []
         while self.peek_token() and self.peek_token()[0] != 'RBRACE':
             block.append(self.parse_statement())
         self.eat('RBRACE')
+        self.nesting_level -= 1
 
         else_block = None
         if self.peek_token() and self.peek_token()[0] == 'ELSE':
             self.eat('ELSE')
             self.eat('LBRACE')
+            self.nesting_level += 1
             else_block = []
             while self.peek_token() and self.peek_token()[0] != 'RBRACE':
                 else_block.append(self.parse_statement())
             self.eat('RBRACE')
+            self.nesting_level -= 1
             
         return IfNode(left, op, right, block, else_block)
 
@@ -617,10 +695,12 @@ class Parser:
         right = self.parse_expression()
         
         self.eat('LBRACE')
+        self.nesting_level += 1
         block = []
         while self.peek_token() and self.peek_token()[0] != 'RBRACE':
             block.append(self.parse_statement())
         self.eat('RBRACE')
+        self.nesting_level -= 1
             
         return WhileNode(left, op, right, block)
 
@@ -632,11 +712,12 @@ class Parser:
 if_label_count = 0
 call_label_count = 0
 
-def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None, external_symbols=None):
+def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None, external_symbols=None, global_vars=None):
     global if_label_count, call_label_count
     if rm is None: rm = RegisterManager()
     if strings_to_embed is None: strings_to_embed = []
     if external_symbols is None: external_symbols = {}
+    if global_vars is None: global_vars = []
     asm = []
     functions_asm = []
 
@@ -652,6 +733,12 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None,
         if hasattr(stmt, 'source_line') and stmt.source_line:
             asm.append(f"\n{stmt.source_line}")
 
+        if isinstance(stmt, GlobalVarNode):
+            if not isinstance(stmt.value, (NumberNode, StringNode, ArrayNode)):
+                raise CompilerError("Global variables must be initialized with constants, strings or arrays.")
+            global_vars.append(stmt)
+            continue
+
         if isinstance(stmt, FunctionDefNode):
             f_asm = [f"{stmt.name}:"]
             if stmt.params:
@@ -665,7 +752,7 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None,
 
                 for addr in reversed(stmt.params):
                     f_asm.append(f"pop {val_reg}")
-                    f_asm.append(f"movi {addr_reg}, {addr}")
+                    f_asm.append(f"movi {addr_reg}, {addr}") 
                     f_asm.append(f"poke {val_reg}, {addr_reg}, {zero_reg}")
 
                 f_asm.append(f"push {ra_reg}")
@@ -683,7 +770,7 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None,
 
         elif isinstance(stmt, ReturnNode):
             if stmt.value:
-                val_asm, val_reg = generate_expression_asm(stmt.value, rm, external_symbols)
+                val_asm, val_reg = generate_expression_asm(stmt.value, rm, external_symbols, strings_to_embed=strings_to_embed, global_vars=global_vars)
                 if val_asm: asm.append(val_asm)
 
                 ra_reg = rm.allocate()
@@ -697,7 +784,7 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None,
             asm.append("pop r15")
 
         elif isinstance(stmt, CallNode):
-            call_asm, res_reg = generate_expression_asm(stmt, rm, external_symbols, is_statement=True)
+            call_asm, res_reg = generate_expression_asm(stmt, rm, external_symbols, is_statement=True, strings_to_embed=strings_to_embed, global_vars=global_vars)
             asm.append(call_asm)
             if res_reg: rm.free(res_reg)
 
@@ -720,19 +807,25 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None,
                 val_reg = rm.allocate() 
                 asm.append(f"movi {val_reg}, {str_label}")
             else:
-                v_asm, val_reg = generate_expression_asm(stmt.value, rm, external_symbols)
+                v_asm, val_reg = generate_expression_asm(stmt.value, rm, external_symbols, strings_to_embed=strings_to_embed, global_vars=global_vars)
                 if v_asm: asm.append(v_asm)
 
             rm.usage_map[val_reg] = True
 
             if isinstance(stmt.target, NumberNode):
-                target_reg = rm.get_reg_with_value(stmt.target.value)
+                is_int = isinstance(stmt.target.value, int)
+                target_val = hex(stmt.target.value) if is_int else stmt.target.value
+                
+                target_reg = None
+                if is_int:
+                    target_reg = rm.get_reg_with_value(stmt.target.value)
+                
                 if not target_reg:
                     target_reg = rm.allocate(stmt.target.value)
-                    asm.append(f"movi {target_reg}, {hex(stmt.target.value)}")
+                    asm.append(f"movi {target_reg}, {target_val}")
             
             elif isinstance(stmt.target, DerefNode):
-                addr_asm, addr_ptr_reg = generate_expression_asm(stmt.target.target, rm, external_symbols)
+                addr_asm, addr_ptr_reg = generate_expression_asm(stmt.target.target, rm, external_symbols, strings_to_embed=strings_to_embed, global_vars=global_vars)
                 if addr_asm: asm.append(addr_asm)
                 
                 target_reg = rm.allocate()
@@ -767,19 +860,19 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None,
             if isinstance(stmt.target, str):
                 asm.append(f"movi r15, {stmt.target}")
             else:
-                target_asm, target_reg = generate_expression_asm(stmt.target, rm, external_symbols)
+                target_asm, target_reg = generate_expression_asm(stmt.target, rm, external_symbols, strings_to_embed=strings_to_embed, global_vars=global_vars)
                 if target_asm: asm.append(target_asm)
                 asm.append(f"mov r15, {target_reg}")
             rm.usage_map = {reg: False for reg in rm.available_regs}
             rm.cache.clear()
 
         elif isinstance(stmt, OutNode):
-            p_asm, p_reg = generate_expression_asm(stmt.port, rm, external_symbols)
+            p_asm, p_reg = generate_expression_asm(stmt.port, rm, external_symbols, strings_to_embed=strings_to_embed, global_vars=global_vars)
             if p_asm: asm.append(p_asm)
 
             rm.usage_map[p_reg] = True
             
-            d_asm, d_reg = generate_expression_asm(stmt.data, rm, external_symbols)
+            d_asm, d_reg = generate_expression_asm(stmt.data, rm, external_symbols, strings_to_embed=strings_to_embed, global_vars=global_vars)
             if d_asm: asm.append(d_asm)
             
             asm.append(f"out {p_reg}, {d_reg}")
@@ -787,11 +880,11 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None,
             rm.cache.clear()
 
         elif isinstance(stmt, (LoadNode, SaveNode)):
-            s_asm, s_reg = generate_expression_asm(stmt.sector, rm, external_symbols)
+            s_asm, s_reg = generate_expression_asm(stmt.sector, rm, external_symbols, strings_to_embed=strings_to_embed, global_vars=global_vars)
             if s_asm: asm.append(s_asm)
             rm.usage_map[s_reg] = True
 
-            a_asm, a_reg = generate_expression_asm(stmt.address, rm, external_symbols)
+            a_asm, a_reg = generate_expression_asm(stmt.address, rm, external_symbols, strings_to_embed=strings_to_embed, global_vars=global_vars)
             if a_asm: asm.append(a_asm)
             rm.usage_map[a_reg] = True
 
@@ -812,11 +905,11 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None,
 
             jump_target = label_else if stmt.else_block else label_end
 
-            l_asm, l_reg = generate_expression_asm(stmt.left, rm, external_symbols)
+            l_asm, l_reg = generate_expression_asm(stmt.left, rm, external_symbols, strings_to_embed=strings_to_embed, global_vars=global_vars)
             if l_asm: asm.append(l_asm)
             rm.usage_map[l_reg] = True
 
-            r_asm, r_reg = generate_expression_asm(stmt.right, rm, external_symbols)
+            r_asm, r_reg = generate_expression_asm(stmt.right, rm, external_symbols, strings_to_embed=strings_to_embed, global_vars=global_vars)
             if r_asm: asm.append(r_asm)
             rm.usage_map[r_reg] = True
 
@@ -867,11 +960,11 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None,
 
             asm.append(f"{label_start}:")
 
-            l_asm, l_reg = generate_expression_asm(stmt.left, rm, external_symbols)
+            l_asm, l_reg = generate_expression_asm(stmt.left, rm, external_symbols, strings_to_embed=strings_to_embed, global_vars=global_vars)
             if l_asm: asm.append(l_asm)
             rm.usage_map[l_reg] = True
 
-            r_asm, r_reg = generate_expression_asm(stmt.right, rm, external_symbols)
+            r_asm, r_reg = generate_expression_asm(stmt.right, rm, external_symbols, strings_to_embed=strings_to_embed, global_vars=global_vars)
             if r_asm: asm.append(r_asm)
             rm.usage_map[r_reg] = True
 
@@ -913,6 +1006,34 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None,
             asm.append("\n; --- Functions Section ---")
             asm.extend(functions_asm)
 
+        if global_vars:
+            asm.append("\n; --- Global Variables Section ---")
+            for var in global_vars:
+                if isinstance(var.value, StringNode):
+                    asm.append(f"{var.name}:")
+                    chars = ", ".join([hex(ord(c)) for c in var.value.value])
+                    asm.append(f".db {chars}, 0x00")
+                
+                elif isinstance(var.value, ArrayNode):
+                    array_len = len(var.value.elements)
+                    asm.append(f"{var.name}_len:")
+                    asm.append(f".dw {hex(array_len)}")
+
+                    asm.append(f"{var.name}:")
+                    directive = ".db" if var.size == 8 else ".dw"
+                    element_values = []
+                    for el in var.value.elements:
+                        val = hex(el.value) if isinstance(el.value, int) else el.value
+                        element_values.append(str(val))
+
+                    asm.append(f"{directive} {', '.join(element_values)}")
+                
+                else:
+                    asm.append(f"{var.name}:")
+                    cmd = ".db" if var.size == 8 else ".dw"
+                    val_out = hex(var.value.value) if isinstance(var.value.value, int) else var.value.value
+                    asm.append(f"{cmd} {val_out}")
+
         if strings_to_embed:
             asm.append("\n; --- String Data Section ---")
             for label, text in strings_to_embed:
@@ -922,16 +1043,24 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None,
         
     return "\n".join(asm)
 
-def generate_expression_asm(node, rm, external_symbols=None, is_statement=False):
+def generate_expression_asm(node, rm, external_symbols=None, is_statement=False, strings_to_embed=None, global_vars=None):
     global call_label_count
     if external_symbols is None: external_symbols = {}
+    if strings_to_embed is None: strings_to_embed = []
+    if global_vars is None: global_vars = []
+
+    if isinstance(node, StringNode):
+        raw_data_label = f"str_data_{len(strings_to_embed)}"
+        strings_to_embed.append((raw_data_label, node.value))
+        reg = rm.allocate()
+        return f"movi {reg}, {raw_data_label}", reg
 
     if isinstance(node, CallNode):
         call_label_count += 1
         asm = ""
 
         for arg in node.args:
-            arg_asm, arg_reg = generate_expression_asm(arg, rm, external_symbols)
+            arg_asm, arg_reg = generate_expression_asm(arg, rm, external_symbols, strings_to_embed=strings_to_embed, global_vars=global_vars)
             asm += arg_asm + "\n"
             asm += f"push {arg_reg}\n"
             rm.free(arg_reg)
@@ -956,17 +1085,19 @@ def generate_expression_asm(node, rm, external_symbols=None, is_statement=False)
             return asm, res_reg
 
     if isinstance(node, NumberNode):
-        val = hex(node.value)
-        existing_reg = rm.get_reg_with_value(node.value)
-        if existing_reg:
-            return "", existing_reg
+        val = hex(node.value) if isinstance(node.value, int) else node.value
+
+        if isinstance(node.value, int):
+            existing_reg = rm.get_reg_with_value(node.value)
+            if existing_reg:
+                return "", existing_reg
 
         reg = rm.allocate(node.value)
         return f"movi {reg}, {val}", reg
     
     if isinstance(node, DerefNode):
         mode = 1 if node.size == 8 else 0
-        addr_asm, addr_reg = generate_expression_asm(node.target, rm, external_symbols)
+        addr_asm, addr_reg = generate_expression_asm(node.target, rm, external_symbols, strings_to_embed=strings_to_embed, global_vars=global_vars)
         
         target_reg = rm.allocate()
         mode_reg = rm.get_reg_with_value(mode)
@@ -980,10 +1111,10 @@ def generate_expression_asm(node, rm, external_symbols=None, is_statement=False)
         return asm, target_reg
 
     if isinstance(node, BinOpNode):
-        left_asm, left_reg = generate_expression_asm(node.left, rm, external_symbols)
+        left_asm, left_reg = generate_expression_asm(node.left, rm, external_symbols, strings_to_embed=strings_to_embed, global_vars=global_vars)
         rm.usage_map[left_reg] = True 
 
-        right_asm, right_reg = generate_expression_asm(node.right, rm, external_symbols)
+        right_asm, right_reg = generate_expression_asm(node.right, rm, external_symbols, strings_to_embed=strings_to_embed, global_vars=global_vars)
         rm.usage_map[right_reg] = True 
 
         if node.op == "%":

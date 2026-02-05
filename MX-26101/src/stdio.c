@@ -1,37 +1,41 @@
 #ifndef STDIO_H
 #define STDIO_H
 
-uint16 0x87D2 = 0x8000;
+def uint16 text_cursor = 0x8000;
+
+#export text_cursor
 
 #export print
 #export strcmp
 #export scroll
 
-void print(0x87E0) { // erwartet string-adresse auf dem stack
-
-    uint16 0x87E2 = uint16 $$0x87E0;
+def uint16 print_string_addr = 0;
+def uint16 print_string_ptr = 0;
+def uint16 print_string_char = 0;
+void print(print_string_addr) { // erwartet string-adresse auf dem stack
+    uint16 print_string_ptr = uint16 $print_string_addr;
 
     print_loop:
-    uint16 0x87E4 = uint8 $$0x87E2;
+    uint16 print_string_char = uint8 $$print_string_ptr;
 
-    if uint16 $0x87E4 != 0 {
-        if uint16 $0x87E4 == 10 {
-            uint16 0x87D2 = uint16 $0x87D2 - ((uint16 $0x87D2 - 0x8000) % 80) + 80;
-            if uint16 $0x87D2 > 0x87CF {
+    if uint16 $print_string_char != 0 {
+        if uint16 $print_string_char == 10 {
+            uint16 text_cursor = uint16 $text_cursor - ((uint16 $text_cursor - 0x8000) % 80) + 80;
+            if uint16 $text_cursor > 0x87CF {
                 scroll();
             }
             goto next_char;
         }
 
-        uint8 $0x87D2 = uint16 $0x87E4;
-        uint16 0x87D2 = uint16 $0x87D2 + 1;
+        uint8 $text_cursor = uint16 $print_string_char;
+        uint16 text_cursor = uint16 $text_cursor + 1;
 
-        if uint16 $0x87D2 > 0x87CF {
+        if uint16 $text_cursor > 0x87CF {
             scroll();
         }
 
         next_char:
-        uint16 0x87E2 = uint16 $0x87E2 + 1;
+        uint16 print_string_ptr = uint16 $print_string_ptr + 1;
         goto print_loop;
     } else {
         goto print_end;
@@ -41,67 +45,49 @@ void print(0x87E0) { // erwartet string-adresse auf dem stack
     return;
 }
 
-void strcmp(0x87E0, 0x87E2) { // erwartet zwei string-adressen auf dem stack
+def uint16 strcmp_string_addr_1 = 0;
+def uint16 strcmp_string_addr_2 = 0;
+void strcmp(strcmp_string_addr_1, strcmp_string_addr_2) { // erwartet zwei string-adressen auf dem stack
 
     strcmp_loop:
-    if uint8 $$$0x87E0 != uint8 $$$0x87E2 {
+    if uint8 $$strcmp_string_addr_1 != uint8 $$strcmp_string_addr_2 {
         return 1;
     }
 
-    if uint8 $$$0x87E0 == 0 {
+    if uint8 $$strcmp_string_addr_1 == 0 {
         return 0;
     }
 
-    if uint8 $$$0x87E2 == 0 {
+    if uint8 $$strcmp_string_addr_2 == 0 {
         return 0;
     }
 
-    uint16 $0x87E0 = uint16 $$0x87E0 + 1;
-    uint16 $0x87E2 = uint16 $$0x87E2 + 1;
+    uint16 strcmp_string_addr_1 = uint16 $strcmp_string_addr_1 + 1;
+    uint16 strcmp_string_addr_2 = uint16 $strcmp_string_addr_2 + 1;
     goto strcmp_loop;
 }
 
+def uint16 scroll_current = 0;
+def uint16 scroll_target = 0;
 void scroll() {
-    asm {
-        movi r0, 0x8000; 
-        movi r1, 0x8050; 
-        movi r2, 0x87D0;
-        movi r5, 1; 
-        movi r6, 32; 
+    uint16 scroll_current = 0x8000;
+    uint16 scroll_target = 0x8050;
+
+    while uint16 $scroll_target < 0x87D0 {
+        uint16 $scroll_current = uint16 $$scroll_target;
+
+        uint16 scroll_current = uint16 $scroll_current + 2;
+        uint16 scroll_target = uint16 $scroll_target + 2;
     }
 
-    scroll_loop:
-    asm {
-        movi r7, end_scroll; 
-        je r1, r2, r7;
-
-        peek r4, r1, r5;
-        poke r4, r0, r5;
-
-        add r0, r5;
-        add r1, r5;
-        
-        movi r15, scroll_loop;
+    uint16 scroll_current = 0x8780; 
+    while uint16 $scroll_current < 0x87D0 {
+        uint16 $scroll_current = 0x2020; 
+        uint16 scroll_current = uint16 $scroll_current + 2;
     }
 
-    end_scroll:
-    asm {
-        movi r0, 0x8780;
-    }
-
-    clear_loop:
-    asm {
-        movi r7, done_scroll;
-        je r0, r2, r7;
-
-        poke r6, r0, r5;
-        add r0, r5;
-        
-        movi r15, clear_loop; 
-    }
-
-    done_scroll:
-    uint16 0x87D2 = 0x8780;
+    uint16 text_cursor = 0x8780; 
+    
     return;
 }
 

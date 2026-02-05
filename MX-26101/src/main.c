@@ -2,25 +2,18 @@
 #sector 10
 #sectors 4
 
-#define text_cursor 0x87D2
-uint16 text_cursor = 0x8000;
-
 #define KEY_IO 0xFFFF
 #define VGA_END 0x87CF
-
-#define running 0x87D0
-
-uint8 running = 1;
 
 void check_key_and_type() {
     if uint8 $KEY_IO != 0 {
         if uint8 $KEY_IO == 'q' {
-            uint8 running = 0;
+            uint16 running = 0;
         }
 
         if uint8 $KEY_IO == 8 {
             if uint16 $text_cursor != 0x8000 {
-                uint16 text_cursor = $text_cursor - 1;
+                uint16 text_cursor = uint16 $text_cursor - 1;
                 uint8 $text_cursor = 32;
             }
             goto end_of_check;
@@ -47,21 +40,23 @@ void check_key_and_type() {
     return;
 }
 
-uint16 0x87F0 = "Hallo, Welt!";
-print(0x87F0);
+print("Hallo!\n");
+print("Was geht?\n");
 
-uint16 0x87F2 = "\nNewline!";
-print(0x87F2);
+def uint16 combined_word = 0xABCD;
+def uint8 high = 0;
+def uint8 low = 0;
+uint8 high = uint8 $combined_word;
+uint8 low = uint8 $(combined_word+1);
 
-if strcmp(0x87F0, 0x87F2) == 0 {
-    uint16 0x87F0 = "\nStrings sind gleich!\n";
-} else {
-    uint16 0x87F0 = "\nStrings sind nicht gleich!\n";
-}
-print(0x87F0);
+def uint8 my_byte_array = {69, 0, 1, 2, 3, 4, 5};
+def uint16 my_word_array = {0, 1, 2, 3, 4, 5};
 
-while uint8 $running == 1 {
+def uint16 running = 1;
+while uint16 $running == 1 {
     check_key_and_type();
 }
+
+print("Halt.\n");
 
 while 1 == 1 {}
