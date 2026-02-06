@@ -302,7 +302,9 @@ while uint16 $COUNTER < 10 {
 | `==` | Execute if equal |
 | `!=` | Execute if not equal |
 | `<` | Execute if less |
-| `>` | Execute if more |
+| `>` | Execute if greater |
+| `>=` | Execute if greater or equal |
+| `<=` | Execute if less or equal |
 
 ## 5. Functions & Subroutines
 Functions allow the encapsulation of logic and the reuse of code blocks. In MX-C, functions are defined using a specific memory-mapping syntax for parameters.
@@ -408,13 +410,7 @@ asm {
 MX-C interacts with the MX-series hardware through direct port output and memory-mapped input. This architecture allows for a standardized way to communicate with peripherals across different CPU models.
 
 ### 7.1 Output Ports (out)
-The `out` command sends data to specific hardware ports. These ports are used to interface with the system's primary output devices, such as serial consoles or debug displays.
-
-**Standard Port Map (Architecture Default):**
-| Port | Mode | Description |
-| :--- | :--- | :--- |
-| `0x01` | Char Mode | Outputs the value as an ASCII character (e.g, 65 -> 'A') |
-| `0x02` | Int Mode | Outputs the value as a Decimal and Hexadecimal string |
+The `out` command sends data to specific hardware ports. These ports are used to interface with the system's primary output devices, such as serial consoles or debug displays. Each CPU as its own ports but `0x1` and `0x2` are the same for every processor.
 
 **Format:**
 ```c

@@ -1,1 +1,1 @@
-{"text_cursor": 1738, "print": 1027, "strcmp": 1318, "scroll": 1546}
+{"text_cursor": 1969, "print": 1027, "scroll": 1348, "cls": 1528, "strcmp": 1606, "memcpy": 1834}

@@ -86,18 +86,6 @@ class OutNode:
         self.data = data
         self.source_line = source_line
 
-class LoadNode:
-    def __init__(self, sector, address, source_line=None):
-        self.sector = sector
-        self.address = address
-        self.source_line = source_line
-
-class SaveNode:
-    def __init__(self, sector, address, source_line=None):
-        self.sector = sector
-        self.address = address
-        self.source_line = source_line
-
 class StringNode:
     def __init__(self, value, source_line=None):
         self.value = value.strip('"')
@@ -160,6 +148,8 @@ TOKEN_SPEC = [
     ('ELSE',       r'else\b'),
     ('EQ',        r'=='),
     ('NE',        r'!='),
+    ('LE', r'<='),
+    ('GE', r'>='),
     ('LT', r'<'),
     ('GT', r'>'),
     ('ASSIGN',    r'='),
@@ -174,8 +164,6 @@ TOKEN_SPEC = [
     ('RPAREN',    r'\)'),
     ('GOTO',      r'goto'),
     ('OUT', r'out\b'),
-    ('LOAD', r'load\b'),
-    ('SAVE', r'save\b'),
     ('FN',      r'void\b'),
     ('RETURN',  r'return\b'),
     ('CHAR', r"'.'"),
@@ -514,7 +502,7 @@ class Parser:
                 if token_type == 'SEMICOLON':
                     asm_content += "\n"
                 elif token_type == 'LABEL':
-                    asm_content += token_value.strip() + "\n" 
+                    asm_content += token_value.strip() + "\n"
                 else:
                     asm_content += token_value + " "
             
@@ -636,17 +624,6 @@ class Parser:
 
         if t[0] == 'NAME':
             self.error(f"Explicit type required before variable/address '{t[1]}'")
-
-        if t[0] in ['LOAD', 'SAVE']:
-            stmt_type = self.eat()[0]
-            sector = self.parse_expression()
-            self.eat('COMMA')
-            address = self.parse_expression()
-            self.eat('SEMICOLON')
-            if stmt_type == 'LOAD':
-                return LoadNode(sector, address, source_line=current_line_text)
-            else:
-                return SaveNode(sector, address, source_line=current_line_text)
         
         self.error(f"Syntax error at {t}")
 
@@ -881,25 +858,6 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None,
             rm.usage_map = {reg: False for reg in rm.available_regs}
             rm.cache.clear()
 
-        elif isinstance(stmt, (LoadNode, SaveNode)):
-            s_asm, s_reg = generate_expression_asm(stmt.sector, rm, external_symbols, strings_to_embed=strings_to_embed, global_vars=global_vars)
-            if s_asm: asm.append(s_asm)
-            rm.usage_map[s_reg] = True
-
-            a_asm, a_reg = generate_expression_asm(stmt.address, rm, external_symbols, strings_to_embed=strings_to_embed, global_vars=global_vars)
-            if a_asm: asm.append(a_asm)
-            rm.usage_map[a_reg] = True
-
-            m_reg = rm.get_reg_with_value(0)
-            if not m_reg:
-                m_reg = rm.allocate(0)
-                asm.append(f"movi {m_reg}, 0")
-                
-            cmd = "load" if isinstance(stmt, LoadNode) else "save"
-            asm.append(f"{cmd} {s_reg}, {a_reg}, {m_reg}")
-            rm.usage_map = {reg: False for reg in rm.available_regs}
-            rm.cache.clear()
-
         elif isinstance(stmt, IfNode):
             if_label_count += 1
             label_else = f"_else_{if_label_count}"
@@ -923,17 +881,13 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None,
             elif stmt.op == "!=":
                 asm.append(f"je {l_reg}, {r_reg}, {t_reg}")
             elif stmt.op == "<":
-                asm.append(f"div {l_reg}, {r_reg}")
-                zero_reg = rm.allocate(0)
-                asm.append(f"movi {zero_reg}, 0")
-                asm.append(f"jne {l_reg}, {zero_reg}, {t_reg}")
-                rm.free(zero_reg)
+                asm.append(f"jge {l_reg}, {r_reg}, {t_reg}")
             elif stmt.op == ">":
-                asm.append(f"div {r_reg}, {l_reg}")
-                zero_reg = rm.allocate(0)
-                asm.append(f"movi {zero_reg}, 0")
-                asm.append(f"jne {r_reg}, {zero_reg}, {t_reg}")
-                rm.free(zero_reg)
+                asm.append(f"jlt {l_reg}, {r_reg}, {t_reg}")
+            elif stmt.op == ">=":
+                asm.append(f"jlt {l_reg}, {r_reg}, {t_reg}")
+            elif stmt.op == "<=":
+                asm.append(f"jgt {l_reg}, {r_reg}, {t_reg}")
 
             rm.free(l_reg)
             rm.free(r_reg)
@@ -978,13 +932,13 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None,
             elif stmt.op == "!=":
                 asm.append(f"je {l_reg}, {r_reg}, {t_reg}")
             elif stmt.op == "<":
-                asm.append(f"div {l_reg}, {r_reg}")
-                z_reg = rm.allocate(0); asm.append(f"movi {z_reg}, 0")
-                asm.append(f"jne {l_reg}, {z_reg}, {t_reg}"); rm.free(z_reg)
+                asm.append(f"jge {l_reg}, {r_reg}, {t_reg}")
             elif stmt.op == ">":
-                asm.append(f"div {r_reg}, {l_reg}")
-                z_reg = rm.allocate(0); asm.append(f"movi {z_reg}, 0")
-                asm.append(f"jne {r_reg}, {z_reg}, {t_reg}"); rm.free(z_reg)
+                asm.append(f"jlt {l_reg}, {r_reg}, {t_reg}")
+            elif stmt.op == ">=":
+                asm.append(f"jlt {l_reg}, {r_reg}, {t_reg}")
+            elif stmt.op == "<=":
+                asm.append(f"jgt {l_reg}, {r_reg}, {t_reg}")
 
             rm.free(l_reg); rm.free(r_reg); rm.free(t_reg)
 
@@ -1120,15 +1074,26 @@ def generate_expression_asm(node, rm, external_symbols=None, is_statement=False,
 
         if node.op == "%":
             mod_instrs = []
-            temp_a = rm.allocate()
-
-            mod_instrs.append(f"mov {temp_a}, {left_reg}")
-            mod_instrs.append(f"div {left_reg}, {right_reg}")
-            mod_instrs.append(f"mul {left_reg}, {right_reg}")
-            mod_instrs.append(f"sub {temp_a}, {left_reg}")
-            mod_instrs.append(f"mov {left_reg}, {temp_a}")
+            label_id = if_label_count
+            if_label_count += 1
             
-            rm.free(temp_a)
+            start_label = f"_mod_start_{label_id}"
+            end_label = f"_mod_end_{label_id}"
+
+            target_reg = rm.allocate()
+
+            mod_instrs.append(f"{start_label}:")
+            mod_instrs.append(f"movi {target_reg}, {end_label}")
+            mod_instrs.append(f"jlt {left_reg}, {right_reg}, {target_reg}") 
+
+            mod_instrs.append(f"sub {left_reg}, {right_reg}")
+
+            mod_instrs.append(f"movi {target_reg}, {start_label}")
+            mod_instrs.append(f"mov r15, {target_reg}")
+            
+            mod_instrs.append(f"{end_label}:")
+            
+            rm.free(target_reg)
             res_asm = f"{left_asm}\n{right_asm}\n" + "\n".join(mod_instrs)
         else:
             op_cmd = {"+": "add", "-": "sub", "*": "mul", "/": "div"}[node.op]

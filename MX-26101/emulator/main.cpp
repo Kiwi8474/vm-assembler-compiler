@@ -10,6 +10,7 @@ MX-26101
 #include <chrono>
 #include <conio.h>
 #include <windows.h>
+#include <csignal>
 
 #define DISK "disk.bin"
 #define VRAM_START 0x8000
@@ -44,6 +45,10 @@ Memory Map
 ===============================================================================
 */
 
+class VM;
+VM* g_vm_ptr = nullptr;
+void handle_ctrl_c(int signum);
+
 class VM {
 private:
     std::vector<uint16_t> regs;
@@ -52,6 +57,8 @@ private:
     std::deque<uint8_t> key_buffer;
     bool running = true;
     bool vram_changed = false;
+    uint16_t disk_buffer_sector = 0;
+    uint16_t disk_buffer_addr = 0;
 
     SharedData* shared_memory = nullptr;
     HANDLE hMapFile = NULL;
@@ -101,11 +108,17 @@ public:
         setupSharedMemory();
 
         std::vector<uint8_t> bios_rom = {
-            0x2E, 0xAF, 0xFF,
-            0x20, 0x00, 0x00,
+            0x20, 0x00, 0x10,
+            0x21, 0x00, 0x00,
+            0x70, 0x10, 0x00,
+            0x20, 0x00, 0x11,
             0x21, 0x02, 0x00,
-            0xC0, 0x10, 0x00,
-            0x2F, 0x02, 0x00
+            0x70, 0x10, 0x00,
+            0x20, 0x00, 0x12,
+            0x21, 0x00, 0x01,
+            0x70, 0x10, 0x00,
+            0x2e, 0xaf, 0xff,
+            0x2f, 0x02, 0x00
         };
         std::copy(bios_rom.begin(), bios_rom.end(), memory.begin());
 
@@ -186,13 +199,10 @@ public:
                 break;
             }
 
-            case 0x6: { // div
-                if (regs[reg_b] != 0) {
-                    regs[reg_a] /= regs[reg_b];
-                } else {
-                    std::cout << "Zero Division. Shutting down." << std::endl;
-                    dump();
-                    running = false;
+            case 0x6: { // jgt
+                if (regs[reg_a] > regs[reg_b]) {
+                    regs[15] = regs[reg_c];
+                    jumped = true;
                 }
                 break;
             }
@@ -201,10 +211,46 @@ public:
                 uint16_t port = regs[reg_a];
                 uint16_t data = regs[reg_b];
 
-                if (port == 0x1) {
-                    std::cout << (char)data << std::flush;
-                } else if (port == 0x2) {
-                    std::cout << (int)data << " / 0x" << std::hex << (int)data << std::dec << std::flush;
+                switch(port) {
+                    case 0x1: // Serieller Port (Char)
+                        std::cout << (char)data << std::flush;
+                        break;
+
+                    case 0x2: // Serieller Port (Int/Hex)
+                        std::cout << (int)data << " / 0x" << std::hex << (int)data << std::dec << std::flush;
+                        break;
+                    case 0x10: // Disk-Port (Sektor setzen)
+                        disk_buffer_sector = data;
+                        break;
+                    case 0x11: // Disk-Port (Adresse setzen)
+                        disk_buffer_addr = data;
+                        break;
+                    case 0x12: // Disk-Port (Command, 1=Load/2=Save)
+                        uint32_t disk_start = disk_buffer_sector * 512;
+                        if (data == 1) {
+                            if (disk_start + 512 <= disk_content.size()) {
+                                std::copy(disk_content.begin() + disk_start, 
+                                        disk_content.begin() + disk_start + 512, 
+                                        memory.begin() + disk_buffer_addr);
+                            }
+                        } else if (data == 2) {
+                            if (disk_buffer_addr + 512 <= 65536) {
+                                std::copy(memory.begin() + disk_buffer_addr, 
+                                        memory.begin() + disk_buffer_addr + 512, 
+                                        disk_content.begin() + disk_start);
+                            } else {
+                                uint32_t first_part = 65536 - disk_buffer_addr;
+                                std::copy(memory.begin() + disk_buffer_addr, memory.end(), disk_content.begin() + disk_start);
+                                std::copy(memory.begin(), memory.begin() + (512 - first_part), disk_content.begin() + disk_start + first_part);
+                            }
+
+                            std::ofstream outfile(DISK, std::ios::binary);
+                            if (outfile.is_open()) {
+                                outfile.write((char*)disk_content.data(), disk_content.size());
+                                outfile.close();
+                            }
+                        }
+                        break;
                 }
                 break;
             }
@@ -260,43 +306,18 @@ public:
                 break;
             }
 
-            case 0xC: { // load
-                uint16_t sector = regs[reg_a];
-                uint16_t start_addr = regs[reg_b];
-
-                uint16_t disk_start = sector * 512;
-
-                std::copy(disk_content.begin() + disk_start,
-                        disk_content.begin() + disk_start + 512, 
-                        memory.begin() + start_addr);
+            case 0xC: { // jlt
+                if (regs[reg_a] < regs[reg_b]) {
+                    regs[15] = regs[reg_c];
+                    jumped = true;
+                }
                 break;
             }
 
-            case 0xD: { // save
-                uint32_t start_addr = regs[reg_b];
-                uint32_t disk_start = regs[reg_a] * 512;
-
-                if (start_addr + 512 <= 65536) {
-                    std::copy(memory.begin() + start_addr, 
-                            memory.begin() + start_addr + 512, 
-                            disk_content.begin() + disk_start);
-                } else {
-                    uint32_t first_part_size = 65536 - start_addr;
-                    uint32_t second_part_size = 512 - first_part_size;
-
-                    std::copy(memory.begin() + start_addr, 
-                            memory.end(), 
-                            disk_content.begin() + disk_start);
-
-                    std::copy(memory.begin(), 
-                            memory.begin() + second_part_size, 
-                            disk_content.begin() + disk_start + first_part_size);
-                }
-
-                std::ofstream outfile(DISK, std::ios::binary);
-                if (outfile.is_open()) {
-                    outfile.write((char*)disk_content.data(), disk_content.size());
-                    outfile.close();
+            case 0xD: { // jge
+                if (regs[reg_a] >= regs[reg_b]) {
+                    regs[15] = regs[reg_c];
+                    jumped = true;
                 }
                 break;
             }
@@ -328,6 +349,8 @@ public:
             regs[15] += 1;
         }
     }
+
+    void stop() { running = false; }
 
     void run() {
         auto last_ips_time = std::chrono::high_resolution_clock::now();
@@ -371,15 +394,24 @@ public:
 
     void dump() {
         for (int i = 0; i < 16; i++) {
-            std::cout << "r" << i << ": " << regs[i] << std::endl;
+            std::cout << "r" << i << ": " << regs[i] << " / 0x" << std::hex << regs[i] << std::dec << std::endl;
         }
-        std::cout << "0xFFFF: " << (int)memory[65535];
+        std::cout << "0xFFFF: " << (int)memory[65535] << " / 0x" << std::hex << int(memory[65535]) << std::dec;
     }
 };
 
+void handle_ctrl_c(int signum) {
+    if (g_vm_ptr) {
+        g_vm_ptr->stop(); 
+    }
+}
+
 int main() {
     VM vm = VM();
+    g_vm_ptr = &vm;
+    std::signal(SIGINT, handle_ctrl_c);
     vm.run();
     vm.dump();
+    system("pause");
     return 0;
 }

@@ -3,3 +3,4 @@
 #sectors 9
 
 #include "stdio.c"
+#include "string.c"

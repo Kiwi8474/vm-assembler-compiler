@@ -6,8 +6,10 @@ def uint16 text_cursor = 0x8000;
 #export text_cursor
 
 #export print
-#export strcmp
 #export scroll
+#export cls
+
+def uint16 temp_calc = 0;
 
 def uint16 print_string_addr = 0;
 def uint16 print_string_ptr = 0;
@@ -20,7 +22,12 @@ void print(print_string_addr) { // erwartet string-adresse auf dem stack
 
     if uint8 $print_string_char != 0 {
         if uint8 $print_string_char == 10 {
-            uint16 text_cursor = uint16 $text_cursor - ((uint16 $text_cursor - 0x8000) % 80) + 80;
+            uint16 temp_calc = uint16 $text_cursor - 0x8000;
+            while uint16 $temp_calc > 79 {
+                uint16 temp_calc = uint16 $temp_calc - 80;
+            }
+            uint16 text_cursor = uint16 $text_cursor - uint16 $temp_calc + 80;
+
             if uint16 $text_cursor > 0x87CF {
                 scroll();
             }
@@ -45,37 +52,11 @@ void print(print_string_addr) { // erwartet string-adresse auf dem stack
     return;
 }
 
-def uint16 strcmp_string_addr_1 = 0;
-def uint16 strcmp_string_addr_2 = 0;
-def uint16 strcmp_result = 0;
-void strcmp(strcmp_string_addr_1, strcmp_string_addr_2) { // erwartet zwei string-adressen auf dem stack
-
-    strcmp_loop:
-    if uint8 $$strcmp_string_addr_1 != uint8 $$strcmp_string_addr_2 {
-        uint16 strcmp_result = 1;
-        return uint16 $strcmp_result;
-    }
-
-    if uint8 $$strcmp_string_addr_1 == 0 {
-        uint16 strcmp_result = 0;
-        return uint16 $strcmp_result;
-    }
-
-    if uint8 $$strcmp_string_addr_2 == 0 {
-        uint16 strcmp_result = 0;
-        return uint16 $strcmp_result;
-    }
-
-    uint16 strcmp_string_addr_1 = uint16 $strcmp_string_addr_1 + 1;
-    uint16 strcmp_string_addr_2 = uint16 $strcmp_string_addr_2 + 1;
-    goto strcmp_loop;
-}
-
 def uint16 scroll_current = 0;
 def uint16 scroll_target = 0;
 void scroll() {
-    uint16 scroll_current = 0x8000;
-    uint16 scroll_target = 0x8050;
+    uint16 scroll_current = 0x8050;
+    uint16 scroll_target = 0x80A0;
 
     while uint16 $scroll_target < 0x87D0 {
         uint16 $scroll_current = uint16 $$scroll_target;
@@ -92,6 +73,17 @@ void scroll() {
 
     uint16 text_cursor = 0x8780; 
     
+    return;
+}
+
+def uint16 cls_current = 0x8000;
+void cls() {
+    uint16 cls_current = 0x8000;
+    while uint16 $cls_current < 0x87CF {
+        uint16 $cls_current = 0x2020;
+        uint16 cls_current = uint16 $cls_current + 2;
+    }
+    uint16 text_cursor = 0x8000;
     return;
 }
 
