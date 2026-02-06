@@ -345,15 +345,27 @@ strcmp(addr1, addr2); // Pushes addr2, then addr1, then calls strcmp
 ```
 
 ### 5.3 Return Values
-Functions can return a single value using the `return <value>;` statement. The result is typically passed back via a dedicated register (handled by the compiler), allowing function calls to be used in expressions.
+Functions can return a single value using the `return <value>;` statement. The result is typically passed back via the hardware stack.
 
 - **Void Return:** Used to simply exit the function. `return;`
-- **Value Return:** Used to pass a result back to the caller. The result can be a literal, an address or a complex expression. `return $0x87E0 + 5;`
+- **Value Return:** Used to pass a result back to the caller. The result can be a dereferenced address or to be more modern: a dereferenced variable. `return uint16 $my_return_val;`
+- **Stability Best Practice:** You should always store the result in a variable first and then return that variable using a dereference. Returning literals (like `return 1;`) directly can lead to stack corruption or incorrect results.
 
 **Example:**
 ```c
-if strcmp(str1, str2) == 0 {
-    // ...
+def uint16 result = 0;
+void my_function() {
+    uint16 result = 42;
+    return uint16 $result;
+}
+```
+
+MX-C also supports using function calls directly within expressions or conditional statements. This allows for more concise coe by using the return value of a function as an operand without manually storing it in a temporary variable.
+
+**Example:**
+```c
+if strcmp(uint16 cmd_input, "exit") == 0 {
+    uint16 running = 0;
 }
 ```
 

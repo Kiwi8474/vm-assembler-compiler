@@ -13,13 +13,13 @@ def uint16 print_string_addr = 0;
 def uint16 print_string_ptr = 0;
 def uint16 print_string_char = 0;
 void print(print_string_addr) { // erwartet string-adresse auf dem stack
-    uint16 print_string_ptr = uint16 $print_string_addr;
+    uint8 print_string_ptr = uint16 $print_string_addr;
 
     print_loop:
-    uint16 print_string_char = uint8 $$print_string_ptr;
+    uint8 print_string_char = uint8 $$print_string_ptr;
 
-    if uint16 $print_string_char != 0 {
-        if uint16 $print_string_char == 10 {
+    if uint8 $print_string_char != 0 {
+        if uint8 $print_string_char == 10 {
             uint16 text_cursor = uint16 $text_cursor - ((uint16 $text_cursor - 0x8000) % 80) + 80;
             if uint16 $text_cursor > 0x87CF {
                 scroll();
@@ -47,19 +47,23 @@ void print(print_string_addr) { // erwartet string-adresse auf dem stack
 
 def uint16 strcmp_string_addr_1 = 0;
 def uint16 strcmp_string_addr_2 = 0;
+def uint16 strcmp_result = 0;
 void strcmp(strcmp_string_addr_1, strcmp_string_addr_2) { // erwartet zwei string-adressen auf dem stack
 
     strcmp_loop:
     if uint8 $$strcmp_string_addr_1 != uint8 $$strcmp_string_addr_2 {
-        return 1;
+        uint16 strcmp_result = 1;
+        return uint16 $strcmp_result;
     }
 
     if uint8 $$strcmp_string_addr_1 == 0 {
-        return 0;
+        uint16 strcmp_result = 0;
+        return uint16 $strcmp_result;
     }
 
     if uint8 $$strcmp_string_addr_2 == 0 {
-        return 0;
+        uint16 strcmp_result = 0;
+        return uint16 $strcmp_result;
     }
 
     uint16 strcmp_string_addr_1 = uint16 $strcmp_string_addr_1 + 1;
