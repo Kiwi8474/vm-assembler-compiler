@@ -168,6 +168,8 @@ TOKEN_SPEC = [
     ('SEMICOLON', r';'),
     ('LBRACE',    r'\{'),
     ('RBRACE',    r'\}'),
+    ('LBRACK',    r'\['),
+    ('RBRACK',    r'\]'),
     ('LPAREN',    r'\('),
     ('RPAREN',    r'\)'),
     ('GOTO',      r'goto'),
@@ -437,11 +439,22 @@ class Parser:
                         args.append(self.parse_expression())
                 self.eat('RPAREN')
                 return CallNode(name, args)
-            return NumberNode(name, size=current_size if current_size else 16)
+
+            node = NumberNode(name, size=16)
+
+            if self.peek_token() and self.peek_token()[0] == 'LBRACK':
+                while self.peek_token() and self.peek_token()[0] == 'LBRACK':
+                    self.eat('LBRACK')
+                    index_expr = self.parse_expression()
+                    self.eat('RBRACK')
+
+                    node = BinOpNode(node, '+', index_expr)
+
+                    node = DerefNode(node, size=current_size if current_size else 8)
+
+            return node
 
         self.error(f"Unexpected '{t[1]}'")
-
-        self.error(f"Unexpected '{token[1]}'")
 
     def parse_expression(self, size=None):
         node = self.parse_factor(size=size)
@@ -641,7 +654,7 @@ class Parser:
         target = self.parse_factor(size=size) 
         if isinstance(target, DerefNode):
             target.size = size
-            
+
         self.eat('ASSIGN')
         value = self.parse_expression(size=size)
         return AssignNode(target, value, size=size)
@@ -812,47 +825,36 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None,
 
             rm.usage_map[val_reg] = True
 
-            if isinstance(stmt.target, NumberNode):
-                is_int = isinstance(stmt.target.value, int)
-                target_val = hex(stmt.target.value) if is_int else stmt.target.value
-                
-                target_reg = None
-                if is_int:
-                    target_reg = rm.get_reg_with_value(stmt.target.value)
-                
-                if not target_reg:
-                    target_reg = rm.allocate(stmt.target.value)
-                    asm.append(f"movi {target_reg}, {target_val}")
-            
-            elif isinstance(stmt.target, DerefNode):
+            if isinstance(stmt.target, DerefNode):
                 addr_asm, addr_ptr_reg = generate_expression_asm(stmt.target.target, rm, external_symbols, strings_to_embed=strings_to_embed, global_vars=global_vars)
                 if addr_asm: asm.append(addr_asm)
-                
-                target_reg = rm.allocate()
-                m0_reg = rm.get_reg_with_value(0)
-                if not m0_reg:
-                    m0_reg = rm.allocate(0)
-                    asm.append(f"movi {m0_reg}, 0")
-                
-                asm.append(f"peek {target_reg}, {addr_ptr_reg}, {m0_reg}")
-                rm.free(addr_ptr_reg)
-            else:
-                if isinstance(stmt.target, str):
-                    symbol_name = stmt.target
+
+                if isinstance(stmt.target.target, BinOpNode):
+                    target_reg = addr_ptr_reg
                 else:
-                    symbol_name = stmt.target.name
-                
+                    target_reg = rm.allocate()
+                    m0_reg = rm.get_reg_with_value(0) or rm.allocate(0)
+                    if not rm.get_reg_with_value(0): asm.append(f"movi {m0_reg}, 0")
+                    asm.append(f"peek {target_reg}, {addr_ptr_reg}, {m0_reg}")
+                    rm.free(addr_ptr_reg)
+            
+            elif isinstance(stmt.target, NumberNode):
+                target_val = hex(stmt.target.value) if isinstance(stmt.target.value, int) else stmt.target.value
+                target_reg = rm.allocate()
+                asm.append(f"movi {target_reg}, {target_val}")
+
+            else:
+                symbol_name = stmt.target if isinstance(stmt.target, str) else stmt.target.name
                 target_reg = rm.allocate()
                 asm.append(f"movi {target_reg}, {symbol_name}")
 
             rm.usage_map[target_reg] = True
             mode = 1 if stmt.size == 8 else 0
-            mode_reg = rm.get_reg_with_value(mode)
-            if not mode_reg:
-                mode_reg = rm.allocate(mode)
-                asm.append(f"movi {mode_reg}, {mode}")
+            mode_reg = rm.get_reg_with_value(mode) or rm.allocate(mode)
+            if not rm.get_reg_with_value(mode): asm.append(f"movi {mode_reg}, {mode}")
 
             asm.append(f"poke {val_reg}, {target_reg}, {mode_reg}")
+
             rm.usage_map = {reg: False for reg in rm.available_regs}
             rm.cache.clear()
 
@@ -1107,15 +1109,14 @@ def generate_expression_asm(node, rm, external_symbols=None, is_statement=False,
             mode_asm = f"movi {mode_reg}, {mode}\n"
 
         asm = f"{addr_asm}\n{mode_asm}peek {target_reg}, {addr_reg}, {mode_reg}"
-        rm.free(addr_reg)
         return asm, target_reg
 
     if isinstance(node, BinOpNode):
         left_asm, left_reg = generate_expression_asm(node.left, rm, external_symbols, strings_to_embed=strings_to_embed, global_vars=global_vars)
-        rm.usage_map[left_reg] = True 
+        rm.usage_map[left_reg] = True
 
         right_asm, right_reg = generate_expression_asm(node.right, rm, external_symbols, strings_to_embed=strings_to_embed, global_vars=global_vars)
-        rm.usage_map[right_reg] = True 
+        rm.usage_map[right_reg] = True
 
         if node.op == "%":
             mod_instrs = []
@@ -1133,7 +1134,6 @@ def generate_expression_asm(node, rm, external_symbols=None, is_statement=False,
             op_cmd = {"+": "add", "-": "sub", "*": "mul", "/": "div"}[node.op]
             res_asm = f"{left_asm}\n{right_asm}\n{op_cmd} {left_reg}, {right_reg}"
 
-        rm.free(left_reg) 
         rm.free(right_reg)
         
         if left_reg in rm.cache: del rm.cache[left_reg]

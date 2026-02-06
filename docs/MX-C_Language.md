@@ -126,6 +126,10 @@ def uint8 my_bytes = {10, 20, 30}; // my_bytes_len will be 3
 def uint16 my_words = {'A', 'B', 'C'}; // my_words_Len will be 3
 ```
 
+**Indexing:** Elements can be accessed by using square brackets `[]`. The compiler automatically calculates the memory offset based on the element size.
+
+**Important (Bit-Width):** Because MX-C uses a prefix-based type system, the `uint8` or `uint16` keyword placed before the access determines how many bytes are read from or written to the index.
+
 **Strings:** When defining a string, the variable holds the start address of the character sequence and _not_ the first character of the string.
 
 **Example:**

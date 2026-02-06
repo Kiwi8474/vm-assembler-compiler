@@ -43,15 +43,6 @@ void check_key_and_type() {
 print("Hallo!\n");
 print("Was geht?\n");
 
-def uint16 combined_word = 0xABCD;
-def uint8 high = 0;
-def uint8 low = 0;
-uint8 high = uint8 $combined_word;
-uint8 low = uint8 $(combined_word+1);
-
-def uint8 my_byte_array = {69, 0, 1, 2, 3, 4, 5};
-def uint16 my_word_array = {0, 1, 2, 3, 4, 5};
-
 def uint16 running = 1;
 while uint16 $running == 1 {
     check_key_and_type();
