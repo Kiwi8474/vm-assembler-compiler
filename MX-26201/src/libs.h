@@ -1,0 +1,1 @@
+{"text_cursor": 2665, "print": 1027, "scroll": 1348, "cls": 1414, "strcmp": 1453, "memcpy": 1681, "memset": 1816, "memset16": 1939, "load": 2059, "draw_asset": 2128, "play_note": 2329, "play_song": 2398}

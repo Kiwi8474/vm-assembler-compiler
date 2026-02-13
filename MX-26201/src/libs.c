@@ -5,3 +5,4 @@
 #include "stdio.c"
 #include "string.c"
 #include "memory.c"
+#include "audio.c"

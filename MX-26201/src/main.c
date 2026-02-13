@@ -86,6 +86,13 @@ void check_key_and_type() {
                     uint16 cmd_found = 1;
                 }
 
+                uint16 cmd_match = strcmp(input_buffer, "song");
+                print(empty_string);
+                if uint16 $cmd_match == 0 {
+                    play_song(15, 0xB200);
+                    uint16 cmd_found = 1;
+                }
+
                 if uint16 $cmd_found == 0 {
                     print("command not found.");
                 }

@@ -4,14 +4,26 @@ import mmap
 import struct
 import pygame
 
-SHM_SIZE = 2012
-SHM_NAME = "Local\\MX-26101_VM_SharedMemory"
+SHM_SIZE = 4013
+SHM_NAME = "Local\\MX-26201_VM_SharedMemory"
+
+COLORS = [
+    (0,0,0), (0,0,170), (0,170,0), (0,170,170),
+    (170,0,0), (170,0,170), (170,85,0), (170,170,170),
+    (85,85,85), (85,85,255), (85,255,85), (85,255,255),
+    (255,85,85), (255,85,255), (255,255,85), (255,255,255)
+]
 
 def start_monitor():
     pygame.init()
     screen = pygame.display.set_mode((800, 400))
     vga_font = pygame.font.SysFont("Courier New", 16)
-    char_cache = {i: vga_font.render(chr(i), True, (0, 255, 0)) for i in range(32, 127)}
+    char_cache = {}
+    for c_idx, color in enumerate(COLORS):
+        char_cache[c_idx] = {
+            i: vga_font.render(chr(i), True, color) 
+            for i in range(32, 127)
+    }
 
     shm = None
     
@@ -31,9 +43,9 @@ def start_monitor():
                 if event.unicode:
                     char_code = ord(event.unicode)
                     if char_code < 256:
-                        shm.seek(2008)
+                        shm.seek(4008) 
                         if shm.read(1) == b'\x00': 
-                            shm.seek(2008)
+                            shm.seek(4008)
                             shm.write(struct.pack('B', char_code))
 
         if shm is None:
@@ -48,10 +60,11 @@ def start_monitor():
             shm.seek(0)
             all_data = shm.read(SHM_SIZE)
 
-            vram_data = all_data[:2000]
-            ips_data = all_data[2000:2008]
+            vram_data = all_data[:4000]
+            ips_data = all_data[4000:4008]
+            video_mode = all_data[4012]
 
-            shm.seek(2009)
+            shm.seek(4009)
             shm.write(struct.pack('BBB', m_grid_x, m_grid_y, m_click))
 
             ips = struct.unpack('d', ips_data)[0]
@@ -65,13 +78,28 @@ def start_monitor():
             pygame.display.set_caption(caption)
 
             screen.fill((0, 0, 0))
-            for i in range(2000):
-                char_code = vram_data[i]
-                if 32 <= char_code <= 126:
+
+            if video_mode == 0:
+                for i in range(2000):
+                    char_code = vram_data[i]
+                    if 32 <= char_code <= 126:
+                        x = (i % 80) * 10
+                        y = (i // 80) * 16
+                        screen.blit(char_cache[2][char_code], (x, y))
+            elif video_mode == 1:
+                for i in range(2000):
+                    vram_idx = i * 2
+                    char_code = vram_data[vram_idx]
+                    attr_byte = vram_data[vram_idx + 1]
+                    fg_idx = attr_byte & 0x0F
+                    bg_idx = (attr_byte >> 4) & 0x0F
                     x = (i % 80) * 10
                     y = (i // 80) * 16
-                    screen.blit(char_cache[char_code], (x, y))
-            
+                    if bg_idx != 0:
+                        pygame.draw.rect(screen, COLORS[bg_idx], (x, y, 10, 16))
+                    if 32 <= char_code <= 126:
+                        screen.blit(char_cache[fg_idx][char_code], (x, y))
+
             pygame.display.flip()
         except Exception as e:
             print(f"Error while reading: {e}")

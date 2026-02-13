@@ -1,5 +1,5 @@
 /*
-MX-26101
+MX-26201
 */
 
 #include <iostream>
@@ -18,12 +18,13 @@ MX-26101
 
 #pragma pack(push, 1)
 struct SharedData {
-    uint8_t vram[2000];
+    uint8_t vram[4000];
     double ips;
     uint8_t key;
     uint8_t mouse_x;
     uint8_t mouse_y;
     uint8_t mouse_btn;
+    uint8_t video_mode;
 };
 #pragma pack(pop)
 
@@ -34,8 +35,8 @@ Memory Map
 0x0000 - 0x01FF : BIOS (512 Bytes)                 - Hardkodiertes ROM-Programm
 0x0200 - 0x03FF : Boot Sektor (512 Bytes)          - Sektor 0 der Disk
 0x0400 - 0x7FFF : Freier RAM (31 KiB)              - Kernel & Programme
-0x8000 - 0x87CF : VRAM (2000 Bytes)                - Grafikspeicher
-0x87D0 - 0xABFF : Low-RAM (9264 Bytes / ~9.05 KiB)
+0x8000 - 0x8FA0 : VRAM (4000 Bytes)                - Grafikspeicher
+0x8FA1 - 0xABFF : Low-RAM (7263 Bytes / ~7.09 KiB)
 0xAC00 - 0xAFFF : Stack (1 KiB)                    - Platz für 512 Words
 0xB000 - 0xFFFB : High-RAM (20475 Bytes / ~20 KiB)
 0xFFFC          : Mausknopf MMIO Port (1 Byte)
@@ -59,6 +60,8 @@ private:
     bool vram_changed = false;
     uint16_t disk_buffer_sector = 0;
     uint16_t disk_buffer_addr = 0;
+    uint16_t buzzer_freq = 0;
+    uint16_t buzzer_duration = 0;
 
     SharedData* shared_memory = nullptr;
     HANDLE hMapFile = NULL;
@@ -88,7 +91,7 @@ private:
             PAGE_READWRITE,
             0,
             sizeof(SharedData),
-            "Local\\MX-26101_VM_SharedMemory"
+            "Local\\MX-26201_VM_SharedMemory"
         );
 
         if (hMapFile == NULL) {
@@ -135,10 +138,10 @@ public:
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             // BIOS-Hardware-Table (0x0100)
-            0x00, 0x01, // Grafiktyp (0x0100)
+            0x00, 0x02, // Grafiktyp (0x0100)
             0x00, 0x01, // Disk-Ports (0x0102)
-            0x00, 0x00, // Buzzer-Ports (0x0104)
-            0x00, 0x00, // Wait-Port (0x0106)
+            0x00, 0x01, // Buzzer-Ports (0x0104)
+            0x00, 0x01, // Wait-Port (0x0106)
         };
         std::copy(bios_rom.begin(), bios_rom.end(), memory.begin());
 
@@ -162,7 +165,7 @@ public:
 
     void updateSharedMemory(double current_ips) {
         if (shared_memory) {
-            memcpy(shared_memory->vram, &memory[VRAM_START], 2000);
+            memcpy(shared_memory->vram, &memory[VRAM_START], 4000);
             shared_memory->ips = current_ips;
         }
     }
@@ -235,7 +238,6 @@ public:
                     case 0x1: // Serieller Port (Char)
                         std::cout << (char)data << std::flush;
                         break;
-
                     case 0x2: // Serieller Port (Int/Hex)
                         std::cout << (int)data << " / 0x" << std::hex << (int)data << std::dec << std::flush;
                         break;
@@ -245,7 +247,7 @@ public:
                     case 0x11: // Disk-Port (Adresse setzen)
                         disk_buffer_addr = data;
                         break;
-                    case 0x12: // Disk-Port (Command, 1=Load/2=Save)
+                    case 0x12: { // Disk-Port (Command, 1=Load/2=Save)
                         uint32_t disk_start = disk_buffer_sector * 512;
                         if (data == 1) {
                             if (disk_start + 512 <= disk_content.size()) {
@@ -271,6 +273,24 @@ public:
                             }
                         }
                         break;
+                    }
+                    case 0x20: // VGA Control
+                        if (shared_memory) {
+                            shared_memory->video_mode = (uint8_t)data;
+                        }
+                        break;
+                    case 0x30: // Buzzer-Port (Frequenz setzen)
+                        buzzer_freq = data;
+                        break;
+                    case 0x31: // Buzzer-Port (Länge setzen)
+                        buzzer_duration = data;
+                        break;
+                    case 0x32: // Buzzer-Port (Control)
+                        Beep(buzzer_freq, buzzer_duration);
+                        break;
+                    case 0x40: // Wait-Port
+                        Sleep(data);
+                        break;
                 }
                 break;
             }
@@ -294,6 +314,10 @@ public:
             case 0xA: { // peek
                 uint16_t addr = regs[reg_b];
                 uint16_t mode = regs[reg_c];
+
+                if (addr == 0xFFF2) {
+                    memory[0xFFF2] = rand() % 256;
+                }
 
                 if (mode == 1) {
                     regs[reg_a] = memory[addr];
@@ -387,7 +411,7 @@ public:
             if (!(cycles_since_last_ips & 8191)) {
                 handleInput();
                 if (vram_changed && shared_memory) {
-                    memcpy(shared_memory->vram, &memory[VRAM_START], 2000);
+                    memcpy(shared_memory->vram, &memory[VRAM_START], 4000);
                     shared_memory->ips = current_ips;
                     vram_changed = false;
                 }

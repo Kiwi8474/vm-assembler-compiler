@@ -1,1 +1,1 @@
-{"text_cursor": 1969, "print": 1027, "scroll": 1348, "cls": 1528, "strcmp": 1606, "memcpy": 1834}
+{"text_cursor": 2239, "print": 1027, "scroll": 1348, "cls": 1528, "strcmp": 1606, "memcpy": 1834, "load": 1969, "draw_asset": 2038}
