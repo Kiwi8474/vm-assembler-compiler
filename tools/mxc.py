@@ -470,6 +470,12 @@ class Parser:
 
             var_name = self.eat('NAME')[1]
 
+            explicit_array_size = None
+            if self.peek_token() and self.peek_token()[0] == 'LBRACK':
+                self.eat('LBRACK')
+                explicit_array_size = int(self.eat('NUMBER')[1], 0)
+                self.eat('RBRACK')
+
             if var_name in self.defined_globals:
                 self.error(f"Variable '{var_name}' already exists.")
 
@@ -489,14 +495,29 @@ class Parser:
                             self.eat('COMMA')
                             elements.append(self.parse_expression(size=size))
                     self.eat('RBRACE')
+
+                    if explicit_array_size is not None:
+                        while len(elements) < explicit_array_size:
+                            elements.append(NumberNode(0, size=size))
+                    
                     val_node = ArrayNode(elements, size=size, source_line=current_line_text)
                 else:
                     val_node = self.parse_expression(size=size)
+
+            elif explicit_array_size is not None:
+                elements = [NumberNode(0, size=size) for _ in range(explicit_array_size)]
+                val_node = ArrayNode(elements, size=size, source_line=current_line_text)
+
             else:
                 val_node = NumberNode(0, size=size, source_line=current_line_text)
 
             self.eat('SEMICOLON')
-            return GlobalVarNode(var_name, size, val_node, source_line=current_line_text)
+
+            total_bits = size
+            if isinstance(val_node, ArrayNode):
+                total_bits = len(val_node.elements) * size
+
+            return GlobalVarNode(var_name, total_bits, val_node, source_line=current_line_text)
 
         if t[0] == 'ASM':
             self.eat('ASM')
@@ -982,7 +1003,7 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None,
                     asm.append(f".dw {hex(array_len)}")
 
                     asm.append(f"{var.name}:")
-                    directive = ".db" if var.size == 8 else ".dw"
+                    directive = ".db" if var.value.size == 8 else ".dw"
                     element_values = []
                     for el in var.value.elements:
                         val = hex(el.value) if isinstance(el.value, int) else el.value

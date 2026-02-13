@@ -9,7 +9,7 @@ def uint8 index;
 uint8 index = uint8 buffer[6];
 out 0x2, uint8 $index;
 
-def uint8 input_buffer = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}; 
+def uint8 input_buffer[16];
 def uint16 input_index;
 def uint16 temp_char;
 def uint16 cmd_match;

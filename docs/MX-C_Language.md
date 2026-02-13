@@ -119,12 +119,14 @@ Strings and arrays are contiguous blocks of memory. To optimize speed, MX-C uses
 - **Data:** Use the variable name directly
 - **Length:** Access the `_len` label or use the prefix-offset: `uint16 $(my_array - 2)`
 
-**Array Definition Syntax:** Arrays are defined using curly braces `{}`. No size specification is needed; the compiler calculates it automatically.
+**Array Definition Syntax:** Arrays are defined using curly braces `{}`. No size specification is needed; the compiler calculates it automatically. If you want to reserve amounts of space, then you can optionally specify the amount.
 
 **Example:**
 ```c
 def uint8 my_bytes = {10, 20, 30}; // my_bytes_len will be 3
 def uint16 my_words = {'A', 'B', 'C'}; // my_words_Len will be 3
+def uint8 input_buffer[32]; // Reserves 32 empty bytes of space
+def uint8 buffer[16] = {1, 2, 3}; // Reserves 16 empty words of space and writes 1, 2, 3 to the first 3 words
 ```
 
 **Indexing:** Elements can be accessed by using square brackets `[]`. The compiler automatically calculates the memory offset based on the element size.
