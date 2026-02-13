@@ -9,11 +9,11 @@ def uint16 text_cursor = 0x8000;
 #export scroll
 #export cls
 
-def uint16 temp_calc = 0;
+def uint16 temp_calc;
 
-def uint16 print_string_addr = 0;
-def uint16 print_string_ptr = 0;
-def uint16 print_string_char = 0;
+def uint16 print_string_addr;
+def uint16 print_string_ptr;
+def uint16 print_string_char;
 void print(print_string_addr) { // erwartet string-adresse auf dem stack
     uint16 print_string_ptr = uint16 $print_string_addr;
 

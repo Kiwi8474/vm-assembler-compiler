@@ -3,9 +3,9 @@
 
 #export strcmp
 
-def uint16 strcmp_string_addr_1 = 0;
-def uint16 strcmp_string_addr_2 = 0;
-def uint16 strcmp_result = 0;
+def uint16 strcmp_string_addr_1;
+def uint16 strcmp_string_addr_2;
+def uint16 strcmp_result;
 void strcmp(strcmp_string_addr_1, strcmp_string_addr_2) { // erwartet zwei string-adressen auf dem stack
 
     strcmp_loop:

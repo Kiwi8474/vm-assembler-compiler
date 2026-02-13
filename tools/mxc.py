@@ -138,6 +138,7 @@ class ArrayNode:
         self.source_line = source_line
 
 TOKEN_SPEC = [
+    ('STRUCT',       r'struct\b'),
     ('DEF',       r'def\b'),
     ('ASM',       r'asm\b'),
     ('TYPE',       r'uint8\b|uint16\b'),
@@ -436,8 +437,10 @@ class Parser:
                     index_expr = self.parse_expression()
                     self.eat('RBRACK')
 
-                    node = BinOpNode(node, '+', index_expr)
+                    if current_size == 16:
+                        index_expr = BinOpNode(index_expr, '*', NumberNode(2, size=16))
 
+                    node = BinOpNode(node, '+', index_expr)
                     node = DerefNode(node, size=current_size if current_size else 8)
 
             return node
@@ -471,25 +474,28 @@ class Parser:
                 self.error(f"Variable '{var_name}' already exists.")
 
             self.defined_globals.add(var_name)
-            self.eat('ASSIGN')
 
-            if self.peek_token() and self.peek_token()[0] == 'LBRACE':
-                self.eat('LBRACE')
-                elements = []
+            val_node = None
+            next_t = self.peek_token()
 
-                if self.peek_token() and self.peek_token()[0] != 'RBRACE':
-                    elements.append(self.parse_expression(size=size))
-                    while self.peek_token() and self.peek_token()[0] == 'COMMA':
-                        self.eat('COMMA')
+            if next_t and next_t[0] == 'ASSIGN':
+                self.eat('ASSIGN')
+                if self.peek_token() and self.peek_token()[0] == 'LBRACE':
+                    self.eat('LBRACE')
+                    elements = []
+                    if self.peek_token() and self.peek_token()[0] != 'RBRACE':
                         elements.append(self.parse_expression(size=size))
-                
-                self.eat('RBRACE')
-                val_node = ArrayNode(elements, size=size, source_line=current_line_text)
+                        while self.peek_token() and self.peek_token()[0] == 'COMMA':
+                            self.eat('COMMA')
+                            elements.append(self.parse_expression(size=size))
+                    self.eat('RBRACE')
+                    val_node = ArrayNode(elements, size=size, source_line=current_line_text)
+                else:
+                    val_node = self.parse_expression(size=size)
             else:
-                val_node = self.parse_expression(size=size)
+                val_node = NumberNode(0, size=size, source_line=current_line_text)
 
             self.eat('SEMICOLON')
-
             return GlobalVarNode(var_name, size, val_node, source_line=current_line_text)
 
         if t[0] == 'ASM':

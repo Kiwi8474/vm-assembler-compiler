@@ -99,11 +99,12 @@ MX-C distinguishes between a memory location (address or variable name) and its 
 ### 2.3 Variables (def)
 The `def` keyword is used to define named variables. The compiler automatically assigns a safe memory address to these names, preventing collisions that often occur with manual hex-mapping.
 
-**Note:** Definitions are only allowed at the top-level of your code. They cannot be placed inside `if` blocks, `while` loops, or functions. Variables must also be initialized with a literal (number or char) before they can hold results from expressions or functions.
+**Note:** Definitions are only allowed at the top-level of your code. They cannot be placed inside `if` blocks, `while` loops, or functions. Variables must also be initialized with a literal (number or char) before they can hold results from expressions or functions. Variables can be initialized with a literal, or declared "empty" (without an assignment). Empty variables are automatically inizialized with 0 by the compiler.
 
 **Example:**
 ```c
-def uint16 player_score = 0;
+def uint16 player_hp = 100; // Explicit initialization
+def uint16 player_score; // Implicit initialization (defaults to 0)
 uint16 player_score = uint16 $player_score + 10;
 ```
 
@@ -322,8 +323,8 @@ void <name>(<address1>, <address2>, ...) {
 
 **Modern Syntax Example (Recommended):**
 ```c
-def uint16 global_counter_ptr = 0;
-def uint16 amount_ptr = 0;
+def uint16 global_counter_ptr;
+def uint16 amount_ptr;
 void add_global_counter(amount_ptr) {
     uint16 global_counter_ptr = uint16 $global_counter_ptr + uint16 $amount_ptr;
     return;
@@ -355,7 +356,7 @@ Functions can return a single value using the `return <value>;` statement. The r
 
 **Example:**
 ```c
-def uint16 result = 0;
+def uint16 result;
 void my_function() {
     uint16 result = 42;
     return uint16 $result;
@@ -527,7 +528,7 @@ Since MX-C uses global scope for all `def` variables and static parameter mappin
 
 **Modern Example:**
 ```c
-def uint16 scroll_target = 0; // Prefixed for the scroll function
+def uint16 scroll_target; // Prefixed for the scroll function
 void scroll(scroll_target) {
     // ...
 }
@@ -552,7 +553,7 @@ Common issues and how to solve them:
 | "Garbage MMIO Data" | Used `uint16` on 8-bit MMIO port | Always use `uint8` for MMIO ports |
 | "Jump out of range" | `#org` mismatch | Ensure `#org` matches the actual load address |
 | "Can't define global variables inside nested blocks" | `def` used inside an if-, while- or function-block | Move the `def` line to the very top of your file, outside of all `{ }` brackets |
-| "Variable not defined" | Used a name in a function header or assignment that wasn't created via `def` | Add `def uint16 <name> = 0;` at the top-level of your code. |
+| "Variable not defined" | Used a name in a function header or assignment that wasn't created via `def` | Add `def uint16 <name>;` at the top-level of your code. |
 | "Array Length Offset" | Pointer arithmetic went into the length field. | Remember: `my_array` points to data, `my_array - 2` points to the length. |
 
 ---

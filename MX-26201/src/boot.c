@@ -2,8 +2,8 @@
 #sector 0
 #sectors 1
 
-def uint16 sector = 0;
-def uint16 addr = 0;
+def uint16 sector;
+def uint16 addr;
 void load(sector, addr) {
     out 0x10, uint16 $sector;
     out 0x11, uint16 $addr;
@@ -25,7 +25,5 @@ load(10, 0x2000);
 load(11, 0x2200);
 load(12, 0x2400);
 load(13, 0x2600);
-
-out 0x20, 0;
 
 goto 0x2000;
