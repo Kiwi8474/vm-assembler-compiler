@@ -23,8 +23,9 @@ All CPU models within our ecosystem follow the standardized MX-naming convention
 - **1:** Generation/Serial number (e.g., 1 for initial series).
 - **01:** Designated core count of the processing unit.
 
-## 3. Core Architecture
+## 3. Core Architectures
 - [**MX-26101**](https://github.com/Kiwi8474/vm-assembler-compiler/blob/main/docs/MX-26101.md)
+- [**MX-26201**](https://github.com/Kiwi8474/vm-assembler-compiler/blob/main/docs/MX-26201.md)
 
 ## 4. System Deployment
 To maintain peak execution speeds, the virtual machines must be compiled with hardware-native optimizations.
