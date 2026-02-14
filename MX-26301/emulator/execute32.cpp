@@ -96,7 +96,39 @@ void VM::compile_block(uint32_t addr) {
             }
             current_pc += 8;
             instructions_compiled = true;
-        } else {
+        }
+        else if (opcode == 0x21) { // SUB
+            if (use_imm) {
+                // sub [rcx + reg_a*4], imm
+                jit_buffer[jit_ptr++] = 0x81; jit_buffer[jit_ptr++] = 0x69; jit_buffer[jit_ptr++] = reg_a * 4;
+                *(uint32_t*)(jit_buffer + jit_ptr) = imm; jit_ptr += 4;
+            } else {
+                uint8_t reg_b = memory[current_pc + 1] & 0x0F;
+                // mov eax, [rcx + reg_b*4] -> sub [rcx + reg_a*4], eax
+                jit_buffer[jit_ptr++] = 0x8B; jit_buffer[jit_ptr++] = 0x41; jit_buffer[jit_ptr++] = reg_b * 4;
+                jit_buffer[jit_ptr++] = 0x29; jit_buffer[jit_ptr++] = 0x41; jit_buffer[jit_ptr++] = reg_a * 4;
+            }
+            current_pc += 8;
+            instructions_compiled = true;
+        } 
+        else if (opcode == 0x22) { // MUL
+            if (use_imm) {
+                // mov eax, [rcx + reg_a*4] -> imul eax, imm -> mov [rcx + reg_a*4], eax
+                jit_buffer[jit_ptr++] = 0x8B; jit_buffer[jit_ptr++] = 0x41; jit_buffer[jit_ptr++] = reg_a * 4;
+                jit_buffer[jit_ptr++] = 0x69; jit_buffer[jit_ptr++] = 0xC0; // imul eax, eax, ...
+                *(uint32_t*)(jit_buffer + jit_ptr) = imm; jit_ptr += 4;
+                jit_buffer[jit_ptr++] = 0x89; jit_buffer[jit_ptr++] = 0x41; jit_buffer[jit_ptr++] = reg_a * 4;
+            } else {
+                uint8_t reg_b = memory[current_pc + 1] & 0x0F;
+                // mov eax, [rcx + reg_a*4] -> imul eax, [rcx + reg_b*4] -> mov [rcx + reg_a*4], eax
+                jit_buffer[jit_ptr++] = 0x8B; jit_buffer[jit_ptr++] = 0x41; jit_buffer[jit_ptr++] = reg_a * 4;
+                jit_buffer[jit_ptr++] = 0x0F; jit_buffer[jit_ptr++] = 0xAF; jit_buffer[jit_ptr++] = 0x41; jit_buffer[jit_ptr++] = reg_b * 4;
+                jit_buffer[jit_ptr++] = 0x89; jit_buffer[jit_ptr++] = 0x41; jit_buffer[jit_ptr++] = reg_a * 4;
+            }
+            current_pc += 8;
+            instructions_compiled = true;
+        }
+        else {
             block_ended = true;
             break;
         }

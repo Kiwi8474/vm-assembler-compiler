@@ -3,35 +3,32 @@
 #sector 1
 
 asm {
-    mov r14, 0xFFFFFFFF; // Stack Pointer auf 32 bit Stack initialisieren
+    mov r14, 0xFFFFFFFF;
     mov r0, 0x20;
     mov r1, 2;
-    out r0, r1; // Pixelmodus einschalten
+    out r0, r1; 
 }
-
-def uint32 addr;
-def uint32 color;
-void draw(addr, color) {
-    asm {
-        mov r2, color;
-        mov.d r0, [r2];
-        mov r3, addr;
-        mov.d r1, [r3];
-        mov.b [r1], r0;
-    }
-    return;
-}
-
-def uint8 x = 10;
-def uint8 y = 5;
-uint8 y = uint8 $y + 1;
-out 2, uint8 $y;
 
 def uint32 index;
 def uint32 vga;
-while uint32 $index <= 50000 {
+
+while uint32 $index < 307200 {
     uint32 vga = uint32 $index + 0x100000;
-    draw(uint32 $vga, 0xFF);
+    
+    asm {
+        mov r0, index;
+        mul r0, 3;
+        add r0, 50;
+        sub r0, index;
+        mov r1, r0;
+    }
+    
+    asm {
+        mov r2, vga;
+        mov.d r3, [r2];
+        mov.b [r3], r1;
+    }
+
     uint32 index = uint32 $index + 1;
 }
 
