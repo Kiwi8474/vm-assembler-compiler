@@ -67,10 +67,14 @@ def assemble_16(line, labels):
     return bytes([b1, b2, b3])
 
 def assemble_32(line, labels):
-    parts = line.replace(",", "").split()
-    if not parts: return b""
+    raw_parts = line.split()
+    if not raw_parts: return b""
     
-    mnemonic_full = parts[0].lower()
+    mnemonic_full = raw_parts[0].lower()
+
+    remaining_line = " ".join(raw_parts[1:])
+    args = [a.strip() for a in remaining_line.split(",") if a.strip()]
+
     size = 2
     is_signed = False
 
@@ -94,12 +98,11 @@ def assemble_32(line, labels):
     use_indirect_src = False
     use_indirect_dest = False
 
-    args = parts[1:]
-
     def parse_arg(arg):
         nonlocal use_indirect_src, use_indirect_dest
+        arg = arg.strip()
         is_ptr = arg.startswith("[") and arg.endswith("]")
-        clean = arg.strip("[]")
+        clean = arg.strip("[] ").strip() 
         return is_ptr, clean
 
     parsed_args = [parse_arg(a) for a in args]
@@ -119,12 +122,14 @@ def assemble_32(line, labels):
         else:
             use_imm = True
             imm_val = get_val(val, labels)
+            if i == 0 and is_ptr: use_indirect_dest = True
+            elif i > 0 and is_ptr: use_indirect_src = True
 
     res[1] = (regs[0] << 4) | (regs[1] & 0x0F)
     res[2] = (regs[2] << 4)
 
     mode = 0
-    if use_imm:           mode |= 0x01
+    if use_imm:          mode |= 0x01
     if use_indirect_src:  mode |= 0x02
     if use_indirect_dest: mode |= 0x04
     if is_signed:         mode |= 0x08
@@ -171,6 +176,10 @@ def assemble(filename, external_labels=None):
                 data_parts = line[3:].split(",")
                 lines_to_process.append((current_address, line, current_bits))
                 current_address += len(data_parts) * 2
+            elif line.startswith(".dd"):
+                data_parts = line[3:].split(",")
+                lines_to_process.append((current_address, line, current_bits))
+                current_address += len(data_parts) * 4
             elif line.startswith(".bits"):
                 current_bits = int(line.split()[1])
                 continue
@@ -197,6 +206,12 @@ def assemble(filename, external_labels=None):
                 else:
                     val = int(val_str, 0)
                 binary += bytes([(val >> 8) & 0xFF, val & 0xFF])
+        elif line.startswith(".dd"):
+            data_parts = line[3:].split(",")
+            for val_str in data_parts:
+                val_str = val_str.strip()
+                val = labels[val_str] if val_str in labels else int(val_str, 0)
+                binary += bytes([(val >> 24) & 0xFF, (val >> 16) & 0xFF, (val >> 8) & 0xFF, val & 0xFF])
         else:
             if bits == 32:
                 binary += assemble_32(line, labels)
