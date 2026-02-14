@@ -1,0 +1,25 @@
+.org 0x200
+.bits 16
+
+2f 02 03 movi r15, _start
+
+_start:
+20 00 20 movi r0, 0x20
+21 00 02 movi r1, 2
+70 10 00 out r0, r1 ; in pixelmodus schalten (funktioniert!)
+
+20 00 01 movi r0, 0x1
+21 00 41 movi r1, 65
+70 10 00 out r0, r1 ; A in output schreiben (funktioniert!)
+
+20 00 ff movi r0, 0xff
+21 00 01 movi r0, 1
+70 10 00 out r0, r1 ; in 32 bit schalten (funktioniert!)
+
+.bits 32
+_32_bit:
+10 00 00 21 00 00 00 01 mov r0, 1 ; 1 landet in r0 (funktioniert!)
+10 10 00 21 00 00 00 42 mov r1, 66 ; 66 landet in r1 (funktioniert!)
+f0 01 00 20 00 00 00 00 out r0, r1 ; B in output schreiben (funktioniert nicht!)
+00 00 00 00 00 00 00 00 nop ; !?
+02 00 00 21 00 00 00 00 jmp 0 ; !?

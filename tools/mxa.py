@@ -1,45 +1,61 @@
 import sys
 import os
 
-isa = {
-    "nop": 0x0,
-    "mov": 0x1,
-    "movi": 0x2,
-    "add": 0x3,
-    "sub": 0x4,
-    "mul": 0x5,
-    "jgt": 0x6,
-    "out": 0x7,
-    "je": 0x8,
-    "jne": 0x9,
-    "peek": 0xA,
-    "poke": 0xB,
-    "jlt": 0xC,
-    "jge": 0xD,
-    "pop": 0xE,
-    "push": 0xF
+isa16 = {
+    "nop": 0x0, "mov": 0x1, "movi": 0x2, "add": 0x3,
+    "sub": 0x4, "mul": 0x5, "jgt": 0x6, "out": 0x7,
+    "je": 0x8, "jne": 0x9, "peek": 0xA, "poke": 0xB,
+    "jlt": 0xC, "jge": 0xD, "pop": 0xE, "push": 0xF
 }
 
-def assemble_line(line, labels):
+isa32 = {
+    "nop": 0x00, "halt": 0x01, "jmp": 0x02, "je": 0x03, "jne": 0x04,
+    "jg": 0x05, "jge": 0x06, "jl": 0x07, "jle": 0x08, "call": 0x09,
+    "ret": 0x0A, "int": 0x0B, "iret": 0x0C,
+
+    "mov": 0x10, "push": 0x11, "pop": 0x12,
+
+    "add": 0x20, "sub": 0x21, "mul": 0x22, "sub": 0x23, "mod": 0x24,
+
+    "and": 0x30, "or": 0x31, "xor": 0x32, "not": 0x33,
+
+    "shl": 0x40, "shr": 0x41, "sar": 0x42, "rol": 0x43, "ror": 0x44,
+
+    "fadd": 0x50, "fsub": 0x51, "fmul": 0x52, "fdiv": 0x53, "fmod": 0x54,
+
+    "fsqrt": 0x60, "fsin": 0x61, "fcos": 0x62, "fabs": 0x63,
+
+    "gpuclear": 0x70, "gpublit": 0x71, "gpurect": 0x72, "gpuline": 0x73, "gpurectfill": 0x74,
+    "gpucirc": 0x75, "gpucircfill": 0x76,
+
+    "time": 0x80, "wait": 0x81, "rand": 0x82,
+
+    "out": 0xF0, "in": 0xF1
+}
+
+def get_val(s, labels):
+    if s in labels:
+        return labels[s]
+    try:
+        return int(s, 0)
+    except Exception as e:
+        print(e)
+
+def assemble_16(line, labels):
     parts = line.replace(",", "").split()
     if not parts: return b""
     
     mnemonic = parts[0].lower()
-    opcode = isa[mnemonic]
+    opcode = isa16[mnemonic]
 
     def reg(s):
         return int(s.lower().replace("r", ""))
-
-    def get_val(s):
-        if s in labels:
-            return labels[s]
-        return int(s, 0)
 
     reg_a = reg(parts[1])
     b1 = (opcode << 4) | (reg_a & 0x0F)
 
     if mnemonic in ["movi"]:
-        val = get_val(parts[2])
+        val = get_val(parts[2], labels)
         b2 = (val >> 8) & 0xFF
         b3 = val & 0xFF
     else:
@@ -50,9 +66,83 @@ def assemble_line(line, labels):
 
     return bytes([b1, b2, b3])
 
+def assemble_32(line, labels):
+    parts = line.replace(",", "").split()
+    if not parts: return b""
+    
+    mnemonic_full = parts[0].lower()
+    size = 2
+    is_signed = False
+
+    tokens = mnemonic_full.split('.')
+    mnemonic = tokens[0]
+    for suffix in tokens[1:]:
+        if suffix == "b": size = 0
+        elif suffix == "w": size = 1
+        elif suffix == "d": size = 2
+        elif suffix == "s": is_signed = True
+
+    if mnemonic not in isa32:
+        print(f"Unknown command: {mnemonic}")
+        return b""
+        
+    opcode = isa32[mnemonic]
+    res = bytearray(8)
+    res[0] = opcode
+
+    use_imm = False
+    use_indirect_src = False
+    use_indirect_dest = False
+
+    args = parts[1:]
+
+    def parse_arg(arg):
+        nonlocal use_indirect_src, use_indirect_dest
+        is_ptr = arg.startswith("[") and arg.endswith("]")
+        clean = arg.strip("[]")
+        return is_ptr, clean
+
+    parsed_args = [parse_arg(a) for a in args]
+
+    reg_idx = 0
+    regs = [0, 0, 0]
+    imm_val = 0
+
+    for i, (is_ptr, val) in enumerate(parsed_args):
+        if val.lower().startswith("r") and any(char.isdigit() for char in val):
+            r_num = int(''.join(filter(str.isdigit, val)))
+            if i == 0 and is_ptr: use_indirect_dest = True
+            elif i > 0 and is_ptr: use_indirect_src = True
+            if reg_idx < 3:
+                regs[reg_idx] = r_num
+                reg_idx += 1
+        else:
+            use_imm = True
+            imm_val = get_val(val, labels)
+
+    res[1] = (regs[0] << 4) | (regs[1] & 0x0F)
+    res[2] = (regs[2] << 4)
+
+    mode = 0
+    if use_imm:           mode |= 0x01
+    if use_indirect_src:  mode |= 0x02
+    if use_indirect_dest: mode |= 0x04
+    if is_signed:         mode |= 0x08
+    mode |= (size << 4)
+    res[3] = mode
+
+    res[4] = (imm_val >> 24) & 0xFF
+    res[5] = (imm_val >> 16) & 0xFF
+    res[6] = (imm_val >> 8) & 0xFF
+    res[7] = imm_val & 0xFF
+        
+    return bytes(res)
+
+start_address = 0x200
 def assemble(filename, external_labels=None):
     labels = external_labels.copy() if external_labels else {}
     current_address = 0x200
+    current_bits = 16
     lines_to_process = []
 
     with open(filename, "r") as f:
@@ -62,22 +152,37 @@ def assemble(filename, external_labels=None):
             
             if line.startswith(".org"):
                 current_address = int(line.split()[1], 0)
-            elif line.endswith(":"):
-                labels[line[:-1]] = current_address
+                start_address = current_address
+            elif line.startswith(".align"):
+                alignment = int(line.split()[1], 0)
+                current_address = (current_address + alignment - 1) & ~(alignment - 1)
+            elif ":" in line:
+                label_part = line.split(":")[0].strip()
+                labels[label_part] = current_address
+                remaining = line.split(":")[1].strip()
+                if not remaining:
+                    continue
+                line = remaining
             elif line.startswith(".db"):
                 data_parts = line[3:].split(",")
-                lines_to_process.append((current_address, line))
+                lines_to_process.append((current_address, line, current_bits))
                 current_address += len(data_parts)
             elif line.startswith(".dw"):
                 data_parts = line[3:].split(",")
-                lines_to_process.append((current_address, line))
+                lines_to_process.append((current_address, line, current_bits))
                 current_address += len(data_parts) * 2
+            elif line.startswith(".bits"):
+                current_bits = int(line.split()[1])
+                continue
             else:
-                lines_to_process.append((current_address, line))
-                current_address += 3
+                lines_to_process.append((current_address, line, current_bits))
+                current_address += 8 if current_bits == 32 else 3
 
     binary = b""
-    for addr, line in lines_to_process:
+    for addr, line, bits in lines_to_process:
+        while len(binary) < (addr - start_address):
+            binary += b'\x00'
+
         if line.startswith(".db"):
             data_parts = line[3:].split(",")
             for val_str in data_parts:
@@ -93,7 +198,10 @@ def assemble(filename, external_labels=None):
                     val = int(val_str, 0)
                 binary += bytes([(val >> 8) & 0xFF, val & 0xFF])
         else:
-            binary += assemble_line(line, labels)
+            if bits == 32:
+                binary += assemble_32(line, labels)
+            else:
+                binary += assemble_16(line, labels)
     
     return binary, labels
 
