@@ -96,6 +96,8 @@ VM::VM() : regs(16, 0), memory(4294967296, 0) {
         disk_content.resize(1440 * 1024, 0);
     }
 
+    jit_buffer = (uint8_t*)VirtualAlloc(NULL, JIT_MAX_SIZE, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+
     regs[15] = 0x00000000;
 }
 

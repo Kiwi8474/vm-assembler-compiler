@@ -27,4 +27,12 @@ def uint8 y = 5;
 uint8 y = uint8 $y + 1;
 out 2, uint8 $y;
 
+def uint32 index;
+def uint32 vga;
+while uint32 $index <= 50000 {
+    uint32 vga = uint32 $index + 0x100000;
+    draw(uint32 $vga, 0xFF);
+    uint32 index = uint32 $index + 1;
+}
+
 while 1 == 1 {}

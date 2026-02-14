@@ -50,8 +50,93 @@ void VM::write_mem32(uint32_t addr, uint32_t val) {
     if (addr >= VRAM_START && addr < VRAM_END) vram_changed = true;
 }
 
+void VM::compile_block(uint32_t addr) {
+    size_t start_offset = jit_ptr;
+    uint32_t current_pc = addr;
+    bool block_ended = false;
+    bool instructions_compiled = false;
+
+    while (!block_ended) {
+        if (current_pc + 8 > memory.size()) {
+            block_ended = true;
+            break;
+        }
+
+        uint8_t opcode = memory[current_pc];
+        uint8_t reg_a = (memory[current_pc + 1] >> 4) & 0x0F;
+        uint8_t mode = memory[current_pc + 3];
+        bool use_imm = mode & 0x01;
+        uint32_t imm = ((uint32_t)memory[current_pc + 4] << 24) | ((uint32_t)memory[current_pc + 5] << 16) |
+                       ((uint32_t)memory[current_pc + 6] << 8) | ((uint32_t)memory[current_pc + 7]);
+
+        if (opcode == 0x10) { // MOV
+            if (use_imm) { // MOV rA, imm
+                jit_buffer[jit_ptr++] = 0xC7; jit_buffer[jit_ptr++] = 0x41; jit_buffer[jit_ptr++] = reg_a * 4;
+                *(uint32_t*)(jit_buffer + jit_ptr) = imm; jit_ptr += 4;
+            } else if (!(mode & 0x06)) { // MOV rA, rB (kein Load/Store)
+                uint8_t reg_b = memory[current_pc + 1] & 0x0F;
+                // Native x86: mov eax, [rcx + reg_b*4] -> mov [rcx + reg_a*4], eax
+                jit_buffer[jit_ptr++] = 0x8B; jit_buffer[jit_ptr++] = 0x41; jit_buffer[jit_ptr++] = reg_b * 4;
+                jit_buffer[jit_ptr++] = 0x89; jit_buffer[jit_ptr++] = 0x41; jit_buffer[jit_ptr++] = reg_a * 4;
+            } else {
+                block_ended = true; // LOAD/STORE -> JIT-Exit
+                break; 
+            }
+            current_pc += 8;
+            instructions_compiled = true;
+        } 
+        else if (opcode == 0x20) { // ADD
+            if (use_imm) {
+                jit_buffer[jit_ptr++] = 0x81; jit_buffer[jit_ptr++] = 0x41; jit_buffer[jit_ptr++] = reg_a * 4;
+                *(uint32_t*)(jit_buffer + jit_ptr) = imm; jit_ptr += 4;
+            } else {
+                uint8_t reg_b = memory[current_pc + 1] & 0x0F;
+                jit_buffer[jit_ptr++] = 0x8B; jit_buffer[jit_ptr++] = 0x41; jit_buffer[jit_ptr++] = reg_b * 4;
+                jit_buffer[jit_ptr++] = 0x01; jit_buffer[jit_ptr++] = 0x41; jit_buffer[jit_ptr++] = reg_a * 4;
+            }
+            current_pc += 8;
+            instructions_compiled = true;
+        } else {
+            block_ended = true;
+            break;
+        }
+
+        if (current_pc - addr > 512) block_ended = true;
+    }
+
+    if (!instructions_compiled) {
+        jit_ptr = start_offset;
+        hot_spots[addr] = -100;
+        return;
+    }
+
+    jit_buffer[jit_ptr++] = 0xC7;
+    jit_buffer[jit_ptr++] = 0x41;
+    jit_buffer[jit_ptr++] = 60;
+    *(uint32_t*)(jit_buffer + jit_ptr) = current_pc;
+    jit_ptr += 4;
+
+    jit_buffer[jit_ptr++] = 0xC3; // RET
+
+    jit_cache[addr] = (JitBlockFunc)(jit_buffer + start_offset);
+
+    hot_spots[addr] = 0;
+}
+
 void VM::execute_32_bit() {
+    if (jit_cache.count(regs[15])) {
+        uint32_t current_pc = regs[15];
+        jit_cache[current_pc](regs.data(), memory.data());
+        return;
+    }
+
     uint32_t pc_val = regs[15];
+    hot_spots[pc_val]++;
+    
+    if (hot_spots[pc_val] > 50) {
+        compile_block(pc_val);
+        return; 
+    }
     
     if (pc_val % 8 != 0) {
         std::cerr << "[ERROR] PC Alignment Fehler: 0x" << std::hex << pc_val << std::endl;
@@ -60,7 +145,6 @@ void VM::execute_32_bit() {
     }
 
     uint8_t opcode = memory[pc_val];
-    uint8_t group = opcode & 0xF0;
     uint8_t reg_a = (memory[pc_val + 1] >> 4) & 0x0F;
     uint8_t reg_b = memory[pc_val + 1] & 0x0F;
     uint8_t reg_c = (memory[pc_val + 2] >> 4) & 0x0F;

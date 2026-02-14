@@ -4,6 +4,7 @@
 #include <vector>
 #include <deque>
 #include <windows.h>
+#include <unordered_map>
 #include "shared_struct.hpp"
 
 #define VRAM_START 0x00100000
@@ -30,6 +31,15 @@ private:
     SharedData* shared_memory = nullptr;
     HANDLE hMapFile = NULL;
 
+    uint8_t* jit_buffer = nullptr;
+    size_t jit_ptr = 0;
+    const size_t JIT_MAX_SIZE = 1024 * 1024 * 10;
+
+    typedef void (*JitBlockFunc)(uint32_t* regs, uint8_t* memory);
+    std::unordered_map<uint32_t, JitBlockFunc> jit_cache;
+
+    std::unordered_map<uint32_t, int> hot_spots;
+
     void handleInput();
     void setupSharedMemory();
 
@@ -53,6 +63,8 @@ public:
     void write_mem8(uint32_t addr, uint8_t val);
     void write_mem16(uint32_t addr, uint16_t val);
     void write_mem32(uint32_t addr, uint32_t val);
+
+    void compile_block(uint32_t addr);
 };
 
 #endif
