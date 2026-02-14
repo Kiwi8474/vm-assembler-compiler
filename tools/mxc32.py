@@ -1029,7 +1029,7 @@ def generate_asm(statements, is_sub_block=False, rm=None, strings_to_embed=None,
                     asm.append(f".dw {hex(array_len)}")
 
                     asm.append(f"{var.name}:")
-                    directive = ".db" if var.value.size == 8 else ".dw"
+                    directive = ".db" if var.size == 8 else (".dw" if var.size == 16 else ".dd")
                     element_values = []
                     for el in var.value.elements:
                         val = hex(el.value) if isinstance(el.value, int) else el.value
