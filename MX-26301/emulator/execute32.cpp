@@ -164,7 +164,7 @@ void VM::execute_32_bit() {
 
     uint32_t pc_val = regs[15];
     hot_spots[pc_val]++;
-    
+
     if (hot_spots[pc_val] > 50) {
         compile_block(pc_val);
         return; 
@@ -620,16 +620,16 @@ void VM::execute_32_bit() {
                 }
 
                 case 0x61: { // fsin
-                    float a = *(float*)&regs[reg_a];
-                    float result = std::sin(a);
+                    float input = *(float*)&regs[reg_b];
+                    float result = std::sin(input);
                     regs[reg_a] = *(uint32_t*)&result;
                     if (reg_a == 15) jumped = true;
                     break;
                 }
 
                 case 0x62: { // fcos
-                    float a = *(float*)&regs[reg_a];
-                    float result = std::cos(a);
+                    float input = *(float*)&regs[reg_b];
+                    float result = std::cos(input);
                     regs[reg_a] = *(uint32_t*)&result;
                     if (reg_a == 15) jumped = true;
                     break;
@@ -639,6 +639,20 @@ void VM::execute_32_bit() {
                     float a = *(float*)&regs[reg_a];
                     float result = std::fabs(a);
                     regs[reg_a] = *(uint32_t*)&result;
+                    if (reg_a == 15) jumped = true;
+                    break;
+                }
+
+                case 0x64: { // f2i
+                    float f_val = *(float*)&regs[reg_a];
+                    regs[reg_a] = (uint32_t)((int32_t)f_val);                
+                    if (reg_a == 15) jumped = true;
+                    break;
+                }
+
+                case 0x65: { // i2f
+                    float f_res = (float)((int32_t)regs[reg_a]);
+                    regs[reg_a] = *(uint32_t*)&f_res;                
                     if (reg_a == 15) jumped = true;
                     break;
                 }
@@ -872,7 +886,7 @@ void VM::execute_32_bit() {
 
                 case 0x81: { // wait
                     uint32_t ms = regs[reg_a];
-                    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+                    Sleep(ms);
                     break;
                 }
 

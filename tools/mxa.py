@@ -1,5 +1,6 @@
 import sys
 import os
+import struct
 
 isa16 = {
     "nop": 0x0, "mov": 0x1, "movi": 0x2, "add": 0x3,
@@ -15,7 +16,7 @@ isa32 = {
 
     "mov": 0x10, "push": 0x11, "pop": 0x12,
 
-    "add": 0x20, "sub": 0x21, "mul": 0x22, "sub": 0x23, "mod": 0x24,
+    "add": 0x20, "sub": 0x21, "mul": 0x22, "div": 0x23, "mod": 0x24,
 
     "and": 0x30, "or": 0x31, "xor": 0x32, "not": 0x33,
 
@@ -23,7 +24,8 @@ isa32 = {
 
     "fadd": 0x50, "fsub": 0x51, "fmul": 0x52, "fdiv": 0x53, "fmod": 0x54,
 
-    "fsqrt": 0x60, "fsin": 0x61, "fcos": 0x62, "fabs": 0x63,
+    "fsqrt": 0x60, "fsin": 0x61, "fcos": 0x62, "fabs": 0x63, "f2i": 0x64,
+    "i2f": 0x65,
 
     "gpuclear": 0x70, "gpublit": 0x71, "gpurect": 0x72, "gpuline": 0x73, "gpurectfill": 0x74,
     "gpucirc": 0x75, "gpucircfill": 0x76,
@@ -37,9 +39,12 @@ def get_val(s, labels):
     if s in labels:
         return labels[s]
     try:
+        if "." in s:
+            f_val = float(s)
+            return struct.unpack('>I', struct.pack('>f', f_val))[0]
         return int(s, 0)
     except Exception as e:
-        print(e)
+        print(f"Error at value {s}: {e}")
 
 def assemble_16(line, labels):
     parts = line.replace(",", "").split()

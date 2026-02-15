@@ -129,7 +129,7 @@ void VM::execute_16_bit() {
                 case 0xFF: // Bitwidth-Port
                     cpu_bit_width = data;
                     if (data == 1) {
-                        regs[15] = 0x300;
+                        regs[15] = 0x400;
                         jumped = true;
                     }
                     break;

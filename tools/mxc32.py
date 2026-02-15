@@ -146,7 +146,7 @@ TOKEN_SPEC = [
     ('ASM',       r'asm\b'),
     ('TYPE',       r'uint8\b|uint16\b|uint32\b|float32\b|int32\b'),
     ('DIRECTIVE', r'[#\.][A-Za-z_]+'),
-    ('NUMBER',    r'(0x[0-9A-Fa-f]+|\d+)'),
+    ('NUMBER',    r'(0x[0-9A-Fa-f]+|\d+\.\d+|\d+)'),
     ('IF',        r'if\b'),
     ('WHILE',        r'while\b'),
     ('ELSE',       r'else\b'),

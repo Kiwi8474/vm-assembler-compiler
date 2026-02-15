@@ -1,5 +1,5 @@
-#org 0x300
-#sectors 6
+#org 0x400
+#sectors 16
 #sector 1
 
 asm {
@@ -7,6 +7,33 @@ asm {
     mov r0, 0x20;
     mov r1, 2;
     out r0, r1; 
+}
+
+def uint32 sub_x;
+def uint32 sub_y;
+def uint32 sub_res;
+void sub(sub_x, sub_y) {
+    out 0x2, uint32 $sub_x;
+    out 0x1, 32;
+    out 0x2, uint32 $sub_y;
+    out 0x1, 32;
+
+    asm {
+        mov r0, sub_x;
+        mov r0, [r0];
+
+        mov r1, sub_y;
+        mov r1, [r1];
+
+        sub r0, r1;
+        mov r1, sub_res;
+        mov [r1], r0;
+    }
+
+    out 0x2, uint32 $sub_res;
+    out 0x1, 10;
+
+    return uint32 $sub_res;
 }
 
 def uint32 triangle_coords;
@@ -51,84 +78,85 @@ void triangle(triangle_coords) {
     return;
 }
 
-void set_tri_arrays() {
-    uint32 quad_tri1[0] = uint32 $Ax;
-    uint32 quad_tri1[1] = uint32 $Ay;
-    uint32 quad_tri1[2] = uint32 $Bx;
-    uint32 quad_tri1[3] = uint32 $By;
-    uint32 quad_tri1[4] = uint32 $Cx;
-    uint32 quad_tri1[5] = uint32 $Cy;
+def uint32 x1; def uint32 y1;
+def uint32 x2; def uint32 y2;
+def uint32 x3; def uint32 y3;
+def uint32 x4; def uint32 y4;
+void set_tri_specific(x1, y1, x2, y2, x3, y3, x4, y4) {
+    uint32 quad_tri1[0] = uint32 $x1;
+    uint32 quad_tri1[1] = uint32 $y1;
+    uint32 quad_tri1[2] = uint32 $x2;
+    uint32 quad_tri1[3] = uint32 $y2;
+    uint32 quad_tri1[4] = uint32 $x3;
+    uint32 quad_tri1[5] = uint32 $y3;
 
-    uint32 quad_tri2[0] = uint32 $Ax;
-    uint32 quad_tri2[1] = uint32 $Ay;
-    uint32 quad_tri2[2] = uint32 $Cx;
-    uint32 quad_tri2[3] = uint32 $Cy;
-    uint32 quad_tri2[4] = uint32 $Dx;
-    uint32 quad_tri2[5] = uint32 $Dy;
-
+    uint32 quad_tri2[0] = uint32 $x1;
+    uint32 quad_tri2[1] = uint32 $y1;
+    uint32 quad_tri2[2] = uint32 $x3;
+    uint32 quad_tri2[3] = uint32 $y3;
+    uint32 quad_tri2[4] = uint32 $x4;
+    uint32 quad_tri2[5] = uint32 $y4;
     return;
 }
 
 def uint32 quad_tri1[6];
 def uint32 quad_tri2[6];
 
-def uint32 Ax; def uint32 Ay; // Oben links
-def uint32 Bx; def uint32 By; // Oben rechts
-def uint32 Cx; def uint32 Cy; // Unten rechts
-def uint32 Dx; def uint32 Dy; // Unten links
+def uint32 V1x; def uint32 V1y; // Vorne Oben Links
+def uint32 V2x; def uint32 V2y; // Vorne Oben Rechts
+def uint32 V3x; def uint32 V3y; // Vorne Unten Rechts
+def uint32 V4x; def uint32 V4y; // Vorne Unten Links
+def uint32 V5x; def uint32 V5y; // Hinten Oben Links
+def uint32 V6x; def uint32 V6y; // Hinten Oben Rechts
+def uint32 V7x; def uint32 V7y; // Hinten Unten Rechts
+def uint32 V8x; def uint32 V8y; // Hinten Unten Links
 
-// Front
-uint32 Ax = 100; uint32 Ay = 100;
-uint32 Bx = 300; uint32 By = 100;
-uint32 Cx = 300; uint32 Cy = 300;
-uint32 Dx = 100; uint32 Dy = 300;
-set_tri_arrays();
-triangle(uint32 quad_tri1);
-triangle(uint32 quad_tri2);
+def uint32 cube_x;
+def uint32 cube_y;
+def uint32 cube_size;
+def uint32 cube_depth;
+void cube(cube_x, cube_y, cube_size, cube_depth) {
+    // 1. Koordinaten berechnen
+    uint32 V1x = uint32 $cube_x; 
+    uint32 V1y = uint32 $cube_y;
+    uint32 V2x = uint32 $cube_x + uint32 $cube_size; 
+    uint32 V2y = uint32 $cube_y;
+    uint32 V3x = uint32 $cube_x + uint32 $cube_size; 
+    uint32 V3y = uint32 $cube_y + uint32 $cube_size;
+    uint32 V4x = uint32 $cube_x; 
+    uint32 V4y = uint32 $cube_y + uint32 $cube_size;
 
-// Hinten
-uint32 Ax = 150; uint32 Ay = 50;
-uint32 Bx = 350; uint32 By = 50;
-uint32 Cx = 350; uint32 Cy = 250;
-uint32 Dx = 150; uint32 Dy = 250;
-set_tri_arrays();
-triangle(uint32 quad_tri1);
-triangle(uint32 quad_tri2);
+    uint32 V5x = uint32 $cube_x + uint32 $cube_depth; 
+    uint32 V5y = uint32 $cube_y - uint32 $cube_depth;
+    uint32 V6x = (uint32 $cube_x + uint32 $cube_size) + uint32 $cube_depth; 
+    uint32 V6y = uint32 $cube_y - uint32 $cube_depth;
+    uint32 V7x = (uint32 $cube_x + uint32 $cube_size) + uint32 $cube_depth;
+    uint32 V7y = (uint32 $cube_y + uint32 $cube_size) - uint32 $cube_depth;
+    uint32 V8x = uint32 $cube_x + uint32 $cube_depth;
+    uint32 V8y = (uint32 $cube_y + uint32 $cube_size) - uint32 $cube_depth;
 
-// Rechts
-uint32 Ax = 300; uint32 Ay = 100;
-uint32 Bx = 350; uint32 By = 50;
-uint32 Cx = 350; uint32 Cy = 250;
-uint32 Dx = 300; uint32 Dy = 300;
-set_tri_arrays();
-triangle(uint32 quad_tri1);
-triangle(uint32 quad_tri2);
+    // 2. Zeichnen
+    // Vorne
+    set_tri_specific(uint32 $V1x, uint32 $V1y, uint32 $V2x, uint32 $V2y, uint32 $V3x, uint32 $V3y, uint32 $V4x, uint32 $V4y);
+    triangle(uint32 quad_tri1); triangle(uint32 quad_tri2);
+    // Hinten
+    set_tri_specific(uint32 $V5x, uint32 $V5y, uint32 $V6x, uint32 $V6y, uint32 $V7x, uint32 $V7y, uint32 $V8x, uint32 $V8y);
+    triangle(uint32 quad_tri1); triangle(uint32 quad_tri2);
+    // Links
+    set_tri_specific(uint32 $V1x, uint32 $V1y, uint32 $V5x, uint32 $V5y, uint32 $V8x, uint32 $V8y, uint32 $V4x, uint32 $V4y);
+    triangle(uint32 quad_tri1); triangle(uint32 quad_tri2);
+    // Rechts
+    set_tri_specific(uint32 $V2x, uint32 $V2y, uint32 $V6x, uint32 $V6y, uint32 $V7x, uint32 $V7y, uint32 $V3x, uint32 $V3y);
+    triangle(uint32 quad_tri1); triangle(uint32 quad_tri2);
+    // Oben
+    set_tri_specific(uint32 $V1x, uint32 $V1y, uint32 $V2x, uint32 $V2y, uint32 $V6x, uint32 $V6y, uint32 $V5x, uint32 $V5y);
+    triangle(uint32 quad_tri1); triangle(uint32 quad_tri2);
+    // Unten
+    set_tri_specific(uint32 $V4x, uint32 $V4y, uint32 $V3x, uint32 $V3y, uint32 $V7x, uint32 $V7y, uint32 $V8x, uint32 $V8y);
+    triangle(uint32 quad_tri1); triangle(uint32 quad_tri2);
+    return;
+}
 
-// Links
-uint32 Ax = 150; uint32 Ay = 50;
-uint32 Bx = 100; uint32 By = 100;
-uint32 Cx = 100; uint32 Cy = 300;
-uint32 Dx = 150; uint32 Dy = 250;
-set_tri_arrays();
-triangle(uint32 quad_tri1);
-triangle(uint32 quad_tri2);
-
-// Oben
-uint32 Ax = 150; uint32 Ay = 50;
-uint32 Bx = 350; uint32 By = 50;
-uint32 Cx = 300; uint32 Cy = 100;
-uint32 Dx = 100; uint32 Dy = 100;
-set_tri_arrays();
-triangle(uint32 quad_tri1);
-triangle(uint32 quad_tri2);
-
-// Unten
-uint32 Ax = 100; uint32 Ay = 300;
-uint32 Bx = 300; uint32 By = 300;
-uint32 Cx = 350; uint32 Cy = 250;
-uint32 Dx = 150; uint32 Dy = 250;
-set_tri_arrays();
-triangle(uint32 quad_tri1);
-triangle(uint32 quad_tri2);
+cube(100, 100, 200, 50);
 
 while 1 == 1 {}
