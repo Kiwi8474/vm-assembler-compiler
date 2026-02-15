@@ -969,6 +969,13 @@ void VM::execute_32_bit() {
                         case 0x32: // Buzzer
                             Beep(buzzer_freq, buzzer_duration);
                             break;
+                        case 0xFF: // Bitwidth-Port
+                            cpu_bit_width = data;
+                            if (data == 1) {
+                                regs[15] = 0x400;
+                                jumped = true;
+                            }
+                            break;
                     }
                     break;
                 }

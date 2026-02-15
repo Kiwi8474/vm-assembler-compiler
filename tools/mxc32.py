@@ -128,10 +128,11 @@ class WhileNode:
         self.source_line = source_line
 
 class GlobalVarNode:
-    def __init__(self, name, size, value, source_line=None):
+    def __init__(self, name, total_bits, value, size=32, source_line=None):
         self.name = name
-        self.size = size
+        self.total_bits = total_bits
         self.value = value
+        self.size = size
         self.source_line = source_line
 
 class ArrayNode:
@@ -547,7 +548,7 @@ class Parser:
             if isinstance(val_node, ArrayNode):
                 total_bits = len(val_node.elements) * size
 
-            return GlobalVarNode(var_name, total_bits, val_node, source_line=current_line_text)
+            return GlobalVarNode(var_name, total_bits, val_node, size=size, source_line=current_line_text)
 
         if t[0] == 'ASM':
             self.eat('ASM')
